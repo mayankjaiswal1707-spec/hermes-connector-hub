@@ -70,7 +70,10 @@ def _load_connector_env() -> None:
                     continue
                 k, v = line.split("=", 1)
                 k, v = k.strip(), v.strip().strip('"').strip("'")
-                if k.startswith("CONNECTOR_") and k not in os.environ:
+                # knobs the hub itself honors when launched via the hidden VBS
+                prefixes = ("CONNECTOR_", "COMBO_")
+                exact = ("CLINE_BRIDGE_PROXY_TIMEOUT", "ANTI_GRAVITY_BRIDGE_PROXY_TIMEOUT")
+                if (k.startswith(prefixes) or k in exact) and k not in os.environ:
                     os.environ[k] = v
     except OSError:
         pass
