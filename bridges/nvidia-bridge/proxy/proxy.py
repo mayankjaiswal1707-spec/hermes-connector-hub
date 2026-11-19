@@ -225,6 +225,51 @@ class Handler(BaseHTTPRequestHandler):
             pass
         self.close_connection = True
 
+    def _send_sse(self, completion: dict) -> None:
+        """Emit an OpenAI-style SSE stream from a completed response."""
+        chunks = []
+        base = {k: completion.get(k) for k in ("id", "object", "created", "model")}
+        first = dict(base)
+        first["choices"] = [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]
+        chunks.append(first)
+        try:
+            msg = completion["choices"][0]["message"]
+        except Exception:
+            msg = {}
+        calls = msg.get("tool_calls") or []
+        if calls:
+            for i, c in enumerate(calls):
+                ch = dict(base)
+                ch["choices"] = [{"index": 0, "delta": {"tool_calls": [{
+                    "index": i, "id": c.get("id"), "type": "function",
+                    "function": c.get("function", {})}]}, "finish_reason": None}]
+                chunks.append(ch)
+        else:
+            content = msg.get("content") or ""
+            for i in range(0, len(content), 180):
+                ch = dict(base)
+                ch["choices"] = [{"index": 0, "delta": {"content": content[i:i + 180]}, "finish_reason": None}]
+                chunks.append(ch)
+        last = dict(base)
+        last["choices"] = [{"index": 0, "delta": {}, "finish_reason": completion["choices"][0].get("finish_reason")}]
+        chunks.append(last)
+        usage = dict(base)
+        usage["choices"] = []
+        usage["usage"] = completion.get("usage")
+        chunks.append(usage)
+        payload = "".join("data: " + json.dumps(x) + "\n\n" for x in chunks) + "data: [DONE]\n\n"
+        raw = payload.encode("utf-8")
+        self.send_response(200)
+        self.send_header("content-type", "text/event-stream; charset=utf-8")
+        self.send_header("cache-control", "no-cache")
+        self.send_header("content-length", str(len(raw)))
+        self.send_header("connection", "close")
+        self.end_headers()
+        try:
+            self.wfile.write(raw)
+        except Exception:
+            pass
+        self.close_connection = True
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path in ("/health", "/healthz"):
@@ -298,12 +343,15 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"{model} -> {finish} in {ms}ms")
                 pt = max(1, len(prompt) // 4)
                 ct = max(1, len(text) // 4)
-                return self._send(200, {
+                completion = {
                     "id": f"chatcmpl-zmb-{uuid.uuid4().hex[:12]}", "object": "chat.completion",
                     "created": int(time.time()), "model": model,
                     "choices": [{"index": 0, "message": msg, "finish_reason": finish, "logprobs": None}],
                     "usage": {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": pt + ct},
-                    "system_fingerprint": "nvidia-bridge"})
+                    "system_fingerprint": "nvidia-bridge"}
+                if payload.get("stream"):
+                    return self._send_sse(completion)
+                return self._send(200, completion)
             last = error or f"HTTP {status}"
             bucket = classify(status, last)
             log(f"{model} -> {bucket} ({last[:90]})")
@@ -330,6 +378,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
