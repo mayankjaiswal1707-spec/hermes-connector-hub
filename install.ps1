@@ -26,7 +26,9 @@ $map = @(
   @('bridges\zhipu-bridge\proxy\proxy.py', 'zhipu-bridge\proxy\proxy.py'),
   @('bridges\zhipu-bridge\proxy\start-proxy.cmd', 'zhipu-bridge\proxy\start-proxy.cmd'),
   @('bridges\nvidia-bridge\proxy\proxy.py', 'nvidia-bridge\proxy\proxy.py'),
-  @('bridges\nvidia-bridge\proxy\start-proxy.cmd', 'nvidia-bridge\proxy\start-proxy.cmd')
+  @('bridges\nvidia-bridge\proxy\start-proxy.cmd', 'nvidia-bridge\proxy\start-proxy.cmd'),
+  @('bridges\openrouter-bridge\proxy\proxy.py', 'openrouter-bridge\proxy\proxy.py'),
+  @('bridges\openrouter-bridge\proxy\start-proxy.cmd', 'openrouter-bridge\proxy\start-proxy.cmd')
 )
 foreach ($m in $map) {
   $src = Join-Path $repo $m[0]

@@ -863,6 +863,38 @@ SEED_PROVIDERS = {
         ],
         "key_env_added_by_connector": False,
     },
+    # OpenRouter free models (port 8383): native OpenAI-compatible pass-through.
+    "openrouter-free": {
+        "name": "OpenRouter Free",
+        "url": "http://127.0.0.1:8383/v1",
+        "key_env": "OPENROUTER_BRIDGE_PROXY_KEY",
+        "auth": "static",
+        "fallback_models": [
+            "openrouter/liquid/lfm-3-1.7b:free",
+            "openrouter/particle-ai/particle-1:free",
+            "openrouter/nvidia/nemotron-3.5-lightning:free",
+            "openrouter/nvidia/nemotron-3.5-super-vl:free",
+            "openrouter/baidu/ernie-5.5-flash-preview:free",
+            "openrouter/recursive/flint-v1.0:free",
+            "openrouter/dots-studio/dots-3-note-preview:free",
+            "openrouter/cohere/north-mini-code:free",
+            "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+            "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        ],
+        "free_override": [
+            "openrouter/liquid/lfm-3-1.7b:free",
+            "openrouter/particle-ai/particle-1:free",
+            "openrouter/nvidia/nemotron-3.5-lightning:free",
+            "openrouter/nvidia/nemotron-3.5-super-vl:free",
+            "openrouter/baidu/ernie-5.5-flash-preview:free",
+            "openrouter/recursive/flint-v1.0:free",
+            "openrouter/dots-studio/dots-3-note-preview:free",
+            "openrouter/cohere/north-mini-code:free",
+            "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+            "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        ],
+        "key_env_added_by_connector": False,
+    },
     # NVIDIA NIM bridge (port 8382): OpenAI-compatible proxy over
     # integrate.api.nvidia.com with a verified working-model whitelist.
     "nvidia-free": {
@@ -1734,6 +1766,7 @@ AUTOSTART_TASKS = [
     ("Hermes_GeminiBridge", "gemini-bridge.cmd"),
     ("Hermes_ZhipuBridge", "zhipu-bridge.cmd"),
     ("Hermes_NvidiaBridge", "nvidia-bridge.cmd"),
+    ("Hermes_OpenRouterBridge", "openrouter-bridge.cmd"),
 ]
 
 
@@ -1776,6 +1809,11 @@ def autostart_write_wrappers() -> None:
         "nvidia-bridge.cmd": (
             "@echo off\r\nrem autostart: NVIDIA NIM bridge proxy (port 8382)\r\n"
             f"cd /d \"{os.path.join(HERMES_HOME, 'nvidia-bridge', 'proxy')}\"\r\n"
+            "call start-proxy.cmd\r\n"
+        ),
+        "openrouter-bridge.cmd": (
+            "@echo off\r\nrem autostart: OpenRouter bridge proxy (port 8383)\r\n"
+            f"cd /d \"{os.path.join(HERMES_HOME, 'openrouter-bridge', 'proxy')}\"\r\n"
             "call start-proxy.cmd\r\n"
         ),
     }
@@ -2035,6 +2073,8 @@ refresh();setInterval(refresh,5000);
 
 
 DEFAULT_COMBO = [
+    {"provider": "openrouter-free", "model": "openrouter/particle-ai/particle-1:free"},
+    {"provider": "openrouter-free", "model": "openrouter/nvidia/nemotron-3.5-lightning:free"},
     {"provider": "gemini-free", "model": "gemini-3.5-flash-lite"},
     {"provider": "nvidia-free", "model": "nvidia/nemotron-3.5-lightning-30b-a3b"},
     {"provider": "gemini-free", "model": "gemini-3.1-flash-lite"},
@@ -2309,7 +2349,8 @@ def cmd_serve(args) -> int:
                     "antigravity-free": "antigravity-bridge.cmd",
                     "gemini-free": "gemini-bridge.cmd",
                     "zhipu-free": "zhipu-bridge.cmd",
-                    "nvidia-free": "nvidia-bridge.cmd"}
+                    "nvidia-free": "nvidia-bridge.cmd",
+                    "openrouter-free": "openrouter-bridge.cmd"}
         last: dict[str, float] = {}
         vbs = os.path.join(CONNECTOR_DIR, "autostart", "run-hidden.vbs")
         while True:
