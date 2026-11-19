@@ -1917,7 +1917,7 @@ function render(logText,R){
  // ---- routing brain ----
  if(R&&R.strategy){const strat=R.strategy;const stats=R.stats||{};
   const opts=['adaptive','fastest','priority','round_robin'];
-  let btns=opts.map(o=>'<button onclick="setStrategy(\''+o+'\')" class="'+(o===strat?'primary':'')+'" style="padding:5px 10px;font-size:11px">'+o+'</button>').join(' ');
+  let btns=opts.map(o=>'<button data-s="'+o+'" onclick="setStrategy(this.dataset.s)" class="'+(o===strat?'primary':'')+'" style="padding:5px 10px;font-size:11px">'+o+'</button>').join(' ');
   let rows='';for(const [m,s] of Object.entries(stats)){const ok=s.ok||0,fail=s.fail||0,avg=s.avg_ms||0;
    const cb=(s.cooldown_until||0)>Date.now()/1000;
    rows+='<tr><td><code>'+esc(m)+'</code></td><td>'+ok+' / '+fail+'</td><td>'+(avg?avg+'ms':'-')+'</td><td>'+(cb?'<span class="badge b-fail">COOLDOWN</span>':'<span class="badge b-ok">ready</span>')+'</td></tr>';}
