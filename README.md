@@ -13,6 +13,7 @@ Hermes Agent
    ├── opencode-free     → http://127.0.0.1:8377/v1   (OpenCode CLI)
    ├── antigravity-free  → http://127.0.0.1:8379/v1   (Antigravity `agy` CLI)
    ├── gemini-free       → http://127.0.0.1:8380/v1   (Google Gemini API key, free tier)
+   ├── zhipu-free        → http://127.0.0.1:8381/v1   (Zhipu/Z.ai GLM free Flash models)
    └── auto-free         → http://127.0.0.1:8399/auto/v1  (smart combo router)
                                   │
                     Connector Hub dashboard/API :8399
@@ -114,6 +115,7 @@ bridges/cline-bridge/proxy/proxy.py   Cline CLI bridge (8378)
 bridges/opencode-bridge/proxy/proxy.py  OpenCode CLI bridge (8377)
 bridges/antigravity-bridge/proxy/proxy.py  agy CLI bridge (8379)
 bridges/gemini-bridge/proxy/proxy.py       Google Gemini API bridge (8380)
+bridges/zhipu-bridge/proxy/proxy.py        Zhipu GLM free Flash bridge (8381)
 scripts/run-hidden.vbs                hidden launcher for autostart
 tests/smoke_test.ps1                  syntax + connectivity verification
 install.ps1                           installer helper
