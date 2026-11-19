@@ -73,6 +73,12 @@ def api_key() -> str | None:
     return os.environ.get("GOOGLE_API_KEY") or ""
 
 
+def api_keys() -> list[str]:
+    """All configured Google keys (AIza... and newer AQ... auth keys)."""
+    return [k.strip() for k in (os.environ.get("GOOGLE_API_KEY", ""),
+                                os.environ.get("GOOGLE_API_KEY_2", "")) if k.strip()]
+
+
 def resolve_model(model: str | None) -> str | None:
     m = (model or "").strip().lower()
     m = re.sub(r"^(gemini|gemini-free)/", "", m)
@@ -180,28 +186,36 @@ def build_prompt(messages: list, tools: list, tool_choice) -> str:
 
 
 def call_gemini(model: str, prompt: str) -> tuple[int, str, int]:
-    key = api_key()
-    if not key:
+    keys = api_keys()
+    if not keys:
         raise RuntimeError("GOOGLE_API_KEY not configured")
     body = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {"maxOutputTokens": 2048, "temperature": 0},
     }
-    req = urllib.request.Request(
-        f"{API_BASE}/{model}:generateContent",
-        data=json.dumps(body).encode("utf-8"),
-        headers={"content-type": "application/json", "x-goog-api-key": key},
-        method="POST")
     t0 = time.monotonic()
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-        status = 200
-    except urllib.error.HTTPError as e:
-        raw = e.read().decode("utf-8", errors="replace")
-        status = e.code
-    ms = int((time.monotonic() - t0) * 1000)
-    return status, raw, ms
+    last_status, last_raw = 0, ""
+    for key in keys:
+        req = urllib.request.Request(
+            f"{API_BASE}/{model}:generateContent",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"content-type": "application/json", "x-goog-api-key": key},
+            method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            return 200, raw, int((time.monotonic() - t0) * 1000)
+        except urllib.error.HTTPError as e:
+            last_status = e.code
+            last_raw = e.read().decode("utf-8", errors="replace")
+            # Google rejects invalid keys with 400 (not 401); retry the next key
+            # only when the error is specifically an auth problem.
+            auth_error = (e.code in (401, 403) or
+                          (e.code == 400 and "api key not valid" in last_raw.lower()))
+            if auth_error:
+                continue
+            break
+    return last_status, last_raw, int((time.monotonic() - t0) * 1000)
 
 
 def extract_text(raw: str) -> tuple[str, str]:
