@@ -30,7 +30,7 @@ TIMEOUT = int(os.environ.get("NVIDIA_BRIDGE_TIMEOUT", "60"))
 API = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 # Only models verified working with the provided NVIDIA NIM key.
-FREE_MODELS = ("nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3.5-bolt-e4b", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "nvidia/nemotron-3.5-super-vl-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b", "minimaxai/minimax-m3.1-flash", "meta/muse-glimmer-30b", "poolside/laguna-xs-2.1", "stepfun-ai/step-5-preview", "mistralai/mistral-large-4-1t-a52b")
+FREE_MODELS = ("nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3.5-bolt-e4b", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "nvidia/nemotron-3.5-super-vl-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b", "minimaxai/minimax-m3.1-flash", "meta/muse-glimmer-30b", "poolside/laguna-xs-2.1", "stepfun-ai/step-5-preview", "mistralai/mistral-large-4-1t-a52b", "google/gemma-4-31b-it")
 PREFERRED = ("minimaxai/minimax-m3.1-flash", "nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3.5-bolt-e4b", "meta/muse-glimmer-30b", "poolside/laguna-xs-2.1", "stepfun-ai/step-5-preview", "nvidia/nemotron-3-ultra-550b-a55b")
 
 _stats = {"requests": 0, "tool_calls": 0, "content": 0, "errors": 0,
