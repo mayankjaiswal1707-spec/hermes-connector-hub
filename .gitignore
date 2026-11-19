@@ -1,0 +1,34 @@
+# Secrets and local state — NEVER commit
+.env
+*.env
+state.json
+state.json.tmp
+*.lock
+tokens/
+connector/tokens/
+*.log
+
+# Local config / backups
+config.yaml
+config.yaml.*
+*.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+
+# OS / editor
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# Generated autostart wrappers with machine-specific paths
+autostart/*.cmd
+
+# Local workspace data
+*/workspace/
