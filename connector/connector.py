@@ -864,6 +864,29 @@ SEED_PROVIDERS = {
         ],
         "key_env_added_by_connector": False,
     },
+    # Nous Portal free models via Hermes' own OAuth (port 8384): reads the
+    # fresh agent_key from hermes/auth.json, so no key is duplicated.
+    "nous-free": {
+        "name": "Nous Portal Free",
+        "url": "http://127.0.0.1:8384/v1",
+        "key_env": "NOUS_BRIDGE_PROXY_KEY",
+        "auth": "static",
+        "fallback_models": [
+            "nous/upstage/solar-mini4:free",
+            "nous/tencent/hy4-flash:free",
+            "nous/stepfun/step-3.7-flash:free",
+            "nous/qwen/qwen4-max:free",
+            "nous/meituan/longcat-2.5:free",
+        ],
+        "free_override": [
+            "nous/upstage/solar-mini4:free",
+            "nous/tencent/hy4-flash:free",
+            "nous/stepfun/step-3.7-flash:free",
+            "nous/qwen/qwen4-max:free",
+            "nous/meituan/longcat-2.5:free",
+        ],
+        "key_env_added_by_connector": False,
+    },
     # OpenRouter free models (port 8383): native OpenAI-compatible pass-through.
     "openrouter-free": {
         "name": "OpenRouter Free",
@@ -1768,6 +1791,7 @@ AUTOSTART_TASKS = [
     ("Hermes_ZhipuBridge", "zhipu-bridge.cmd"),
     ("Hermes_NvidiaBridge", "nvidia-bridge.cmd"),
     ("Hermes_OpenRouterBridge", "openrouter-bridge.cmd"),
+    ("Hermes_NousBridge", "nous-bridge.cmd"),
 ]
 
 
@@ -1815,6 +1839,11 @@ def autostart_write_wrappers() -> None:
         "openrouter-bridge.cmd": (
             "@echo off\r\nrem autostart: OpenRouter bridge proxy (port 8383)\r\n"
             f"cd /d \"{os.path.join(HERMES_HOME, 'openrouter-bridge', 'proxy')}\"\r\n"
+            "call start-proxy.cmd\r\n"
+        ),
+        "nous-bridge.cmd": (
+            "@echo off\r\nrem autostart: Nous Portal bridge proxy (port 8384)\r\n"
+            f"cd /d \"{os.path.join(HERMES_HOME, 'nous-bridge', 'proxy')}\"\r\n"
             "call start-proxy.cmd\r\n"
         ),
     }
@@ -2185,6 +2214,7 @@ refresh();setInterval(refresh,5000);
 
 
 DEFAULT_COMBO = [
+    {"provider": "nous-free", "model": "nous/tencent/hy4-flash:free"},
     {"provider": "openrouter-free", "model": "openrouter/particle-ai/particle-1:free"},
     {"provider": "openrouter-free", "model": "openrouter/nvidia/nemotron-3.5-lightning:free"},
     {"provider": "gemini-free", "model": "gemini-3.5-flash-lite"},
@@ -2529,7 +2559,8 @@ def cmd_serve(args) -> int:
                     "gemini-free": "gemini-bridge.cmd",
                     "zhipu-free": "zhipu-bridge.cmd",
                     "nvidia-free": "nvidia-bridge.cmd",
-                    "openrouter-free": "openrouter-bridge.cmd"}
+                    "openrouter-free": "openrouter-bridge.cmd",
+                    "nous-free": "nous-bridge.cmd"}
         last: dict[str, float] = {}
         vbs = os.path.join(CONNECTOR_DIR, "autostart", "run-hidden.vbs")
         while True:

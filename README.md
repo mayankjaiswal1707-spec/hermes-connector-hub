@@ -16,6 +16,7 @@ Hermes Agent
    ├── zhipu-free        → http://127.0.0.1:8381/v1   (Zhipu/Z.ai GLM free Flash models)
    ├── nvidia-free       → http://127.0.0.1:8382/v1   (NVIDIA NIM key, working models)
    ├── openrouter-free   → http://127.0.0.1:8383/v1   (OpenRouter :free models, native pass-through)
+   ├── nous-free         → http://127.0.0.1:8384/v1   (Hermes Nous Portal free models via your login)
    └── auto-free         → http://127.0.0.1:8399/auto/v1  (smart combo router)
                                   │
                     Connector Hub dashboard/API :8399
@@ -120,6 +121,7 @@ bridges/gemini-bridge/proxy/proxy.py       Google Gemini API bridge (8380)
 bridges/zhipu-bridge/proxy/proxy.py        Zhipu GLM free Flash bridge (8381)
 bridges/nvidia-bridge/proxy/proxy.py       NVIDIA NIM bridge (8382)
 bridges/openrouter-bridge/proxy/proxy.py   OpenRouter free-model bridge (8383)
+bridges/nous-bridge/proxy/proxy.py         Nous Portal free bridge (8384)
 scripts/run-hidden.vbs                hidden launcher for autostart
 tests/smoke_test.ps1                  syntax + connectivity verification
 install.ps1                           installer helper
