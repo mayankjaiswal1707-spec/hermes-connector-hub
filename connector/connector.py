@@ -33,6 +33,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import socket
 import concurrent.futures as cf
 import threading
 import time
@@ -504,6 +505,7 @@ def state_load() -> dict:
     st.setdefault("updated_at", utcnow())
     st.setdefault("providers", {})
     st.setdefault("combos", {"free-auto": {"chain": list(DEFAULT_COMBO)}})
+    st.setdefault("routing", {"strategy": "adaptive", "stats": {}})
     pol = copy.deepcopy(DEFAULT_POLICY)
     pol.update(st.get("policy") or {})
     st["policy"] = pol
@@ -1867,7 +1869,8 @@ let S=null;
 async function j(u,o){const r=await fetch(u,o);let d={};try{d=await r.json()}catch(e){}if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d}
 async function post(u,b){return j(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})})}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function refresh(){try{S=await j('/status');let L={lines:''};try{L=await j('/api/logs')}catch(e){}render(L.lines)}catch(e){document.getElementById('updated').textContent='error: '+e.message}}
+async function refresh(){try{S=await j('/status');let L={lines:''};try{L=await j('/api/logs')}catch(e){}let R={};try{R=await j('/api/routing')}catch(e){}render(L.lines,R)}catch(e){document.getElementById('updated').textContent='error: '+e.message}}
+function setStrategy(s){post('/api/routing',{strategy:s}).then(refresh).catch(e=>alert(e.message))}
 function sweep(deep,force){if(deep&&!confirm('Deep sweep probes EVERY free model and consumes provider free quota. Continue?'))return;post('/api/sweep',{deep:deep,force:force}).then(refresh).catch(e=>alert(e.message))}
 function testAll(){post('/api/sweep',{deep:true,force:true}).then(()=>{if(S&&S.engine){S.engine.busy=true;S.engine.current='all providers'}render()}).catch(e=>alert(e.message))}
 function restartGateway(){if(!confirm('Restart the Hermes gateway now?'))return;post('/api/restart-gateway').then(()=>alert('Gateway restart started')).catch(e=>alert(e.message))}
@@ -1880,7 +1883,8 @@ function addProvider(ev){ev.preventDefault();const b={url:aUrl.value.trim(),key:
  if(aAuth.value==='oauth'){const c=aOauth.value.trim();if(!c){addmsg.textContent='oauth config JSON is required for oauth mode';return false}try{b.oauth_config=JSON.parse(c)}catch(e){addmsg.textContent='oauth config is not valid JSON';return false}}
  if(aAuth.value==='static'&&!b.key){addmsg.textContent='';alert('API key is required for static providers');return false}
  addmsg.textContent='registering + probing in background...';post('/api/add',b).then(()=>{addmsg.textContent='added - probing; the provider card will show Keep/Delete when done';refresh()}).catch(e=>{addmsg.textContent='';alert(e.message)});return false}
-function render(logText){
+function render(logText,R){
+ R=R||{};
  updated.textContent='updated '+new Date().toLocaleTimeString()+(S&&S.last_model_refresh?(' · catalog '+esc(S.last_model_refresh.replace('T',' ').replace('Z',''))):'');
  engine.innerHTML=(S&&S.engine&&S.engine.busy)?('<span class="spin"></span>testing: '+esc(S.engine.current||'...')):'idle';
  const showFree=fFree.checked,showHermes=fHermes.checked,showWork=fWork.checked;
@@ -1905,7 +1909,17 @@ function render(logText){
   });
   html+='<div class="card"><div class="combo-head"><div><b>◆ Auto Combo</b> <span class="muted">&nbsp;one endpoint, automatic fallback across providers</span></div>'
    +'<code>auto-free  ·  http://127.0.0.1:8399/auto/v1</code></div><div class="chain">'+nodes+'</div>'
-   +'<div class="muted" style="font-size:11px;margin-top:10px">Hermes sends one request to <code>auto</code>; it skips QUOTA/FAIL models and forwards to the first healthy model in this chain.</div></div>';
+   +'<div class="muted" style="font-size:11px;margin-top:10px">Hermes sends one request to <code>auto</code>; the router scores candidates and forwards to the best healthy model.</div></div>';
+ }
+ // ---- routing brain ----
+ if(R&&R.strategy){const strat=R.strategy;const stats=R.stats||{};
+  const opts=['adaptive','fastest','priority','round_robin'];
+  let btns=opts.map(o=>'<button onclick="setStrategy(\''+o+'\')" class="'+(o===strat?'primary':'')+'" style="padding:5px 10px;font-size:11px">'+o+'</button>').join(' ');
+  let rows='';for(const [m,s] of Object.entries(stats)){const ok=s.ok||0,fail=s.fail||0,avg=s.avg_ms||0;
+   const cb=(s.cooldown_until||0)>Date.now()/1000;
+   rows+='<tr><td><code>'+esc(m)+'</code></td><td>'+ok+' / '+fail+'</td><td>'+(avg?avg+'ms':'-')+'</td><td>'+(cb?'<span class="badge b-fail">COOLDOWN</span>':'<span class="badge b-ok">ready</span>')+'</td></tr>';}
+  html+='<div class="card"><div class="combo-head"><div><b>🧠 Routing brain</b> <span class="muted">&nbsp;think before acting · attempt timeout '+(R.attempt_timeout||35)+'s</span></div><div>'+btns+'</div></div>'
+   +(rows?'<table><tr><th>Model</th><th>OK / Fail</th><th>Avg latency</th><th>State</th></tr>'+rows+'</table>':'<div class="muted" style="margin-top:10px">No routing data yet — send a request to <code>auto</code>.</div>')+'</div>';
  }
  for(const [slug,p] of Object.entries(S.providers||{})){
   const rows=[];
@@ -1954,45 +1968,136 @@ def combo_chain(st: dict) -> list[dict]:
     return cfg.get("chain") or DEFAULT_COMBO
 
 
-def combo_chat(payload: dict, st: dict) -> tuple[int, dict, dict]:
-    """Route a chat request through the combo chain: skip quota/failing models,
-    forward to the first healthy provider, fall back on any upstream failure."""
-    chain = combo_chain(st)
-    attempts = []
-    wants_stream = bool(payload.get("stream"))
-    for entry in chain:
-        slug = entry.get("provider")
-        model = entry.get("model")
+_ROUTE_CACHE = {"at": 0.0, "st": None}
+_ROUTE_LOCK = threading.Lock()
+_ROUND_ROBIN = {"i": 0}
+COMBO_ATTEMPT_TIMEOUT = max(8, int(os.environ.get("COMBO_ATTEMPT_TIMEOUT", "35")))
+
+
+def routing_state() -> dict:
+    """Cached state snapshot so routing never hits the disk per request."""
+    now = time.monotonic()
+    cached = _ROUTE_CACHE["st"]
+    if cached is not None and now - _ROUTE_CACHE["at"] < 5.0:
+        return cached
+    st = state_load()
+    _ROUTE_CACHE.update(at=now, st=st)
+    return st
+
+
+def tcp_alive(url: str, timeout: float = 0.5) -> bool:
+    """Fast preflight: skip a bridge whose port is closed, instantly."""
+    try:
+        u = urllib.parse.urlparse(url)
+        host = u.hostname or "127.0.0.1"
+        port = u.port or (443 if u.scheme == "https" else 80)
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def combo_candidates(st: dict) -> list[dict]:
+    """Think before acting: score and order the chain using live stats."""
+    now = time.time()
+    routing = st.setdefault("routing", {})
+    strategy = routing.get("strategy", "adaptive")
+    stats = routing.setdefault("stats", {})
+    out = []
+    for idx, e in enumerate(combo_chain(st)):
+        slug, model = e.get("provider"), e.get("model")
         p = st.get("providers", {}).get(slug)
         if not p or not model:
             continue
         rec = (p.get("models") or {}).get(model, {})
         if rec.get("removed_upstream") or rec.get("status") in ("quota", "failing"):
-            attempts.append(f"{model}: skipped ({rec.get('status', 'unknown')})")
             continue
+        s = stats.get(model, {})
+        if (s.get("cooldown_until") or 0) > now:
+            continue
+        url = p.get("hermes_url") or p["url"]
+        if not tcp_alive(url):
+            continue
+        ok, fail = s.get("ok", 0), s.get("fail", 0)
+        total = ok + fail
+        rate = (ok / total) if total else 0.6
+        avg = s.get("avg_ms") or 8000
+        if strategy == "priority":
+            score = 1000000 - idx * 1000
+        elif strategy == "fastest":
+            score = 1000000 - avg
+        elif strategy == "round_robin":
+            score = 1000000 - abs(_ROUND_ROBIN["i"] - idx) * 1000
+        else:  # adaptive
+            score = rate * 500000 - avg * 0.5 + (10000 if not total else 0)
+        out.append({"provider": slug, "model": model, "url": url, "score": score})
+    out.sort(key=lambda c: -c["score"])
+    _ROUND_ROBIN["i"] = (_ROUND_ROBIN["i"] + 1) % max(1, len(combo_chain(st)))
+    return out
+
+
+def combo_note(st: dict, model: str, ms: int, ok: bool) -> None:
+    """Record outcome + apply circuit breaker. Persisted atomically."""
+    with _ROUTE_LOCK:
+        stats = st.setdefault("routing", {}).setdefault("stats", {})
+        s = stats.setdefault(model, {"ok": 0, "fail": 0, "avg_ms": None,
+                                     "consecutive_fail": 0})
+        if ok:
+            s["ok"] = s.get("ok", 0) + 1
+            s["consecutive_fail"] = 0
+            s["last_ms"] = ms
+            prev = s.get("avg_ms")
+            s["avg_ms"] = int(ms if prev is None else prev * 0.7 + ms * 0.3)
+            s.pop("cooldown_until", None)
+            s.pop("last_error", None)
+        else:
+            s["fail"] = s.get("fail", 0) + 1
+            s["consecutive_fail"] = s.get("consecutive_fail", 0) + 1
+            s["last_fail"] = utcnow()
+            if s["consecutive_fail"] >= 3:
+                s["cooldown_until"] = time.time() + 300
+                log(f"combo: circuit breaker open for {model} (300s)")
+        try:
+            state_save(st)
+        except Exception:
+            pass
+
+
+def combo_chat(payload: dict, st: dict | None = None) -> tuple[int, dict, dict]:
+    """Think (score/select) then act (forward), falling back on any failure."""
+    st = st or routing_state()
+    attempts = []
+    wants_stream = bool(payload.get("stream"))
+    for cand in combo_candidates(st):
+        model, slug = cand["model"], cand["provider"]
+        p = st["providers"][slug]
         key, _ = provider_bearer(slug, p)
-        url = (p.get("hermes_url") or p["url"]).rstrip("/") + "/chat/completions"
+        url = cand["url"].rstrip("/") + "/chat/completions"
         body = dict(payload or {})
         body["model"] = model
-        # Internal hop is always non-streaming: the bridge answers with a JSON
-        # completion we can inspect. Hermes accepts a normal response for a
-        # streaming request, so this stays transparent to the caller.
         body["stream"] = False
         body.pop("stream_options", None)
-        status, data = http_json(url, "POST", body, key=key,
-                                 timeout=max(60, PROBE_TIMEOUT_S))
+        t0 = time.monotonic()
+        try:
+            status, data = http_json(url, "POST", body, key=key,
+                                     timeout=COMBO_ATTEMPT_TIMEOUT)
+        except Exception as exc:
+            status, data = 0, {"_error": str(exc)}
+        ms = int((time.monotonic() - t0) * 1000)
         if status == 200 and isinstance(data, dict) and data.get("choices"):
+            combo_note(st, model, ms, True)
             data = dict(data)
             data["model"] = f"auto/{model}"
-            return 200, data, {"model": model, "provider": slug, "attempts": attempts,
-                               "stream": wants_stream}
+            return 200, data, {"model": model, "provider": slug,
+                               "attempts": attempts, "stream": wants_stream}
         msg = ""
         if isinstance(data, dict) and isinstance(data.get("error"), dict):
             msg = str(data["error"].get("message") or "")[:120]
-        attempts.append(f"{model}: HTTP {status} {msg}")
-        log(f"combo: {model} failed (HTTP {status}) -> next")
+        combo_note(st, model, ms, False)
+        attempts.append(f"{model}: HTTP {status} {msg} ({ms}ms)")
+        log(f"combo: {model} failed (HTTP {status}, {ms}ms) -> next best")
     return 502, openai_error(
-        "auto combo: every model in the chain failed: " + "; ".join(attempts[-6:]),
+        "auto combo: no healthy model available: " + "; ".join(attempts[-6:]),
         "api_error", 502, "combo_exhausted"), {"attempts": attempts}
 
 
@@ -2111,6 +2216,37 @@ def cmd_serve(args) -> int:
 
     bg(auto_refresh_loop)
 
+    def watchdog_loop():
+        """Auto-restart any bridge whose port is dead (with storm protection)."""
+        interval = max(15, int(os.environ.get("CONNECTOR_WATCHDOG_SEC", "60")))
+        wrappers = {"cline-free": "cline-bridge.cmd",
+                    "opencode-free": "opencode-bridge.cmd",
+                    "antigravity-free": "antigravity-bridge.cmd"}
+        last: dict[str, float] = {}
+        vbs = os.path.join(CONNECTOR_DIR, "autostart", "run-hidden.vbs")
+        while True:
+            time.sleep(interval)
+            try:
+                st = state_load()
+                for slug, wrapper in wrappers.items():
+                    p = st.get("providers", {}).get(slug)
+                    if not p or tcp_alive(p["url"]):
+                        continue
+                    now = time.time()
+                    if now - last.get(slug, 0) < 180:
+                        continue
+                    last[slug] = now
+                    cmd = os.path.join(CONNECTOR_DIR, "autostart", wrapper)
+                    if os.path.isfile(vbs) and os.path.isfile(cmd):
+                        flags = 0x08000000 if os.name == "nt" else 0
+                        subprocess.run(["wscript.exe", vbs, cmd],
+                                       creationflags=flags, timeout=20)
+                        log(f"watchdog: restarted {slug} ({wrapper})")
+            except Exception as e:
+                log(f"watchdog error: {e}")
+
+    bg(watchdog_loop)
+
     def restart_gateway_bg():
         srv_state["restarting"] = True
         try:
@@ -2158,17 +2294,35 @@ def cmd_serve(args) -> int:
                     for m in combo_models(state_load())]})
             if path == "/api/logs":
                 return self._send(200, {"lines": tail_log()})
+            if path == "/api/routing":
+                st = state_load()
+                routing = st.setdefault("routing", {"strategy": "adaptive", "stats": {}})
+                return self._send(200, {"strategy": routing.get("strategy", "adaptive"),
+                                        "stats": routing.get("stats", {}),
+                                        "attempt_timeout": COMBO_ATTEMPT_TIMEOUT,
+                                        "candidates": combo_candidates(st)})
             return self._err(404, f"unknown path {path}")
 
         def do_POST(self):
             path = self.path.split("?")[0]
             body = self._body()
             if path in ("/auto/v1/chat/completions", "/auto/chat/completions"):
-                status, data, route = combo_chat(body, state_load())
+                status, data, route = combo_chat(body)
                 log(f"combo route -> {route.get('model', 'n/a')} (HTTP {status})")
                 if status == 200 and route.get("stream"):
                     return self._send(200, combo_sse(data), ctype="text/event-stream")
                 return self._send(status, data)
+            if path == "/api/routing":
+                strategy = str(body.get("strategy") or "").strip().lower()
+                if strategy not in ("adaptive", "fastest", "priority", "round_robin"):
+                    return self._err(400, "strategy must be adaptive|fastest|priority|round_robin")
+                with state_lock():
+                    st = state_load()
+                    st.setdefault("routing", {})["strategy"] = strategy
+                    state_save(st)
+                _ROUTE_CACHE["at"] = 0.0  # invalidate cache
+                log(f"combo strategy -> {strategy}")
+                return self._send(200, {"strategy": strategy})
             if path == "/api/sweep":
                 st = state_load()
                 if ENGINE["busy"]:

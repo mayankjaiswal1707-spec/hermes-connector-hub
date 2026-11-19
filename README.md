@@ -20,6 +20,8 @@ Hermes Agent
 - **3 bridges** wrap local CLIs as OpenAI-compatible chat endpoints.
 - **Connector Hub** registers providers, probes every free model, writes working models into Hermes config, and serves the dashboard at `http://127.0.0.1:8399/`.
 - **Auto Combo** is a virtual provider that chains the three bridges, skips quota/failing models, and forwards to the first healthy one. One request, automatic fallback.
+- **Routing brain ("think before acting"):** adaptive scoring by success rate, EWMA latency, and failure streak; circuit-breaker cooldown after 3 consecutive failures; selectable strategies `adaptive` / `fastest` / `priority` / `round_robin` via the dashboard or `POST /api/routing`. TCP preflight skips dead bridges instantly; cached routing state avoids a disk read per request.
+- **Bridge watchdog:** checks each bridge port every 60s and auto-restarts dead ones via the existing autostart wrappers (with 180s restart-storm protection).
 - **Status truth:** `working` / `quota` / `failing` badges reflect real upstream responses. Quota-limited models are kept as "Retry Later" and never auto-deleted. The global `model:` default is never touched.
 
 ## Features
@@ -76,6 +78,11 @@ hermes-connectors.cmd retry opencode/beam-free
 hermes-connectors.cmd refresh-models
 hermes-connectors.cmd autostart --status
 
+# routing brain
+#   dashboard: "Routing brain" panel -> click a strategy
+curl -X POST http://127.0.0.1:8399/api/routing -H "content-type: application/json" -d "{\"strategy\":\"fastest\"}"
+curl http://127.0.0.1:8399/api/routing
+
 # use a specific provider in Hermes (does not change the global default)
 hermes -z "hello" --provider cline-free -m cline-free/solar-mini4
 
@@ -91,6 +98,8 @@ hermes -z "hello" --provider auto-free -m auto
 | `CONNECTOR_PROBE_TIMEOUT` | `120` | Client probe timeout seconds (keep > bridge timeout) |
 | `CONNECTOR_PROBE_COOLDOWN_H` | `6` | Hours before a sentinel re-probe |
 | `CONNECTOR_AUTO_REFRESH_MIN` | `30` | Background catalog reconcile interval |
+| `CONNECTOR_WATCHDOG_SEC` | `60` | Health-check interval for auto-restarting dead bridges |
+| `COMBO_ATTEMPT_TIMEOUT` | `35` | Per-model attempt timeout inside the combo router |
 | `CLINE_BRIDGE_PROXY_TIMEOUT` | `90` | Cline CLI subprocess timeout |
 | `ANTI_GRAVITY_BRIDGE_PROXY_TIMEOUT` | `110` | agy subprocess timeout |
 
