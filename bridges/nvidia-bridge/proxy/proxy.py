@@ -30,20 +30,13 @@ TIMEOUT = int(os.environ.get("NVIDIA_BRIDGE_TIMEOUT", "60"))
 API = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 # Only models verified working with the provided NVIDIA NIM key.
-FREE_MODELS = ("nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3.5-bolt-e4b", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "nvidia/nemotron-3.5-super-vl-120b-a12b", "minimaxai/minimax-m3.1-flash")
-PREFERRED = ("nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3.5-bolt-e4b", "minimaxai/minimax-m3.1-flash", "nvidia/nemotron-3.5-super-vl-120b-a12b")
+FREE_MODELS = ("nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3.5-bolt-e4b", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "nvidia/nemotron-3.5-super-vl-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b", "minimaxai/minimax-m3.1-flash", "meta/muse-glimmer-30b", "poolside/laguna-xs-2.1", "stepfun-ai/step-5-preview", "mistralai/mistral-large-4-1t-a52b")
+PREFERRED = ("minimaxai/minimax-m3.1-flash", "nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3.5-bolt-e4b", "meta/muse-glimmer-30b", "poolside/laguna-xs-2.1", "stepfun-ai/step-5-preview", "nvidia/nemotron-3-ultra-550b-a55b")
 
 _stats = {"requests": 0, "tool_calls": 0, "content": 0, "errors": 0,
           "failovers": 0, "started": time.time(), "last_ms": None, "last_model": None}
 
-CONTRACT = """You are a JSON decision engine for an EXTERNAL runtime (Hermes). Do NOT use or mention your own tools. Reply with EXACTLY ONE JSON object, no markdown/fences/prose.
-
-Output (choose one):
-1. {"tool_calls":[{"name":"<tool>","arguments":{...}}]}  (use ONLY tool names listed under TOOLS)
-2. {"content":"<final answer to the user>"}
-
-Rules: arguments is a JSON object ({} if none). Multiple calls in one list. Never invent tool output. If no tool needed or task complete -> {"content":"..."}.
-CRITICAL: For greetings, simple questions, tests, "reply with only X", or any request that just needs a text answer, you MUST output {"content":"..."}. Do NOT call a tool for these. Only emit tool_calls when the user explicitly asks you to perform a real external action (run a command, read/write a file, fetch data) that cannot be answered from the transcript."""
+CONTRACT = """You are an assistant responding inside an agent runtime. Answer the user directly and concisely.\n\nCRITICAL RULES:\n- For greetings, simple questions, tests, "reply with only X", or anything answerable with text: output ONLY a plain text answer. NEVER call a tool.\n- Only call a tool when the user explicitly asks for a real external action (run a command, read/write a file, fetch live data).\n- Always finish with a plain text answer; never end on a tool call.\n\nIf a tool is genuinely required, output exactly one JSON object: {"tool_calls":[{"name":"<tool>","arguments":{...}}]} using only the listed TOOLS.\nOtherwise output exactly: {"content":"<your answer>"}"""
 
 
 def log(msg):
@@ -337,5 +330,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 
 
