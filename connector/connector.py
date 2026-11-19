@@ -839,6 +839,36 @@ SEED_PROVIDERS = {
     # Antigravity bridge (port 8379): OpenAI-compatible proxy over the
     # Antigravity CLI (`agy -p`). Free Google tier: all models the account
     # can use via the CLI are free -> free_override covers the whole list.
+    # Google Gemini API bridge (port 8380): OpenAI-compatible proxy over the
+    # Gemini free tier using GOOGLE_API_KEY from hermes/.env.
+    "gemini-free": {
+        "name": "Gemini Free (Google API key)",
+        "url": "http://127.0.0.1:8380/v1",
+        "key_env": "GEMINI_BRIDGE_PROXY_KEY",
+        "auth": "static",
+        "fallback_models": [
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-2.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-flash-latest",
+            "gemini-3.5-flash",
+        ],
+        "free_override": [
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-2.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-flash-latest",
+            "gemini-3.5-flash",
+        ],
+        "key_env_added_by_connector": False,
+    },
+    # Antigravity bridge (port 8379): OpenAI-compatible proxy over the
+    # Antigravity CLI (`agy -p`). Free Google tier: all models the account
+    # can use via the CLI are free -> free_override covers the whole list.
     "antigravity-free": {
         "name": "Antigravity Free",
         "url": "http://127.0.0.1:8379/v1",
@@ -1671,6 +1701,7 @@ AUTOSTART_TASKS = [
     ("Hermes_ClineBridge", "cline-bridge.cmd"),
     ("Hermes_OpenCodeBridge", "opencode-bridge.cmd"),
     ("Hermes_AntigravityBridge", "antigravity-bridge.cmd"),
+    ("Hermes_GeminiBridge", "gemini-bridge.cmd"),
 ]
 
 
@@ -1698,6 +1729,11 @@ def autostart_write_wrappers() -> None:
         "antigravity-bridge.cmd": (
             "@echo off\r\nrem autostart: Antigravity bridge proxy (port 8379)\r\n"
             f"cd /d \"{os.path.join(HERMES_HOME, 'antigravity-bridge', 'proxy')}\"\r\n"
+            "call start-proxy.cmd\r\n"
+        ),
+        "gemini-bridge.cmd": (
+            "@echo off\r\nrem autostart: Gemini bridge proxy (port 8380)\r\n"
+            f"cd /d \"{os.path.join(HERMES_HOME, 'gemini-bridge', 'proxy')}\"\r\n"
             "call start-proxy.cmd\r\n"
         ),
     }
@@ -1957,6 +1993,8 @@ refresh();setInterval(refresh,5000);
 
 
 DEFAULT_COMBO = [
+    {"provider": "gemini-free", "model": "gemini-3.5-flash-lite"},
+    {"provider": "gemini-free", "model": "gemini-3.1-flash-lite"},
     {"provider": "cline-free", "model": "cline-free/nemotron-3.5-super-vl"},
     {"provider": "cline-free", "model": "cline-free/solar-mini4"},
     {"provider": "opencode-free", "model": "opencode/beam-free"},
@@ -2224,7 +2262,8 @@ def cmd_serve(args) -> int:
         interval = max(15, int(os.environ.get("CONNECTOR_WATCHDOG_SEC", "60")))
         wrappers = {"cline-free": "cline-bridge.cmd",
                     "opencode-free": "opencode-bridge.cmd",
-                    "antigravity-free": "antigravity-bridge.cmd"}
+                    "antigravity-free": "antigravity-bridge.cmd",
+                    "gemini-free": "gemini-bridge.cmd"}
         last: dict[str, float] = {}
         vbs = os.path.join(CONNECTOR_DIR, "autostart", "run-hidden.vbs")
         while True:

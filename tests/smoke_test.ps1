@@ -18,7 +18,8 @@ $sources = @(
   'connector\connector.py',
   'bridges\cline-bridge\proxy\proxy.py',
   'bridges\opencode-bridge\proxy\proxy.py',
-  'bridges\antigravity-bridge\proxy\proxy.py'
+  'bridges\antigravity-bridge\proxy\proxy.py',
+  'bridges\gemini-bridge\proxy\proxy.py'
 )
 foreach ($s in $sources) {
   $f = Join-Path $root $s
@@ -29,7 +30,7 @@ foreach ($s in $sources) {
 }
 
 # 2) Local endpoint health (informational if services are not running)
-foreach ($p in 8377, 8378, 8379, 8399) {
+foreach ($p in 8377, 8378, 8379, 8380, 8399) {
   try {
     $r = Invoke-RestMethod -TimeoutSec 8 "http://127.0.0.1:$p/health"
     Write-Host "OK   endpoint $p (ok=$($r.ok))"

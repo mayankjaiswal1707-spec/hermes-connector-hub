@@ -12,12 +12,13 @@ Hermes Agent
    ├── cline-free        → http://127.0.0.1:8378/v1   (Cline CLI)
    ├── opencode-free     → http://127.0.0.1:8377/v1   (OpenCode CLI)
    ├── antigravity-free  → http://127.0.0.1:8379/v1   (Antigravity `agy` CLI)
+   ├── gemini-free       → http://127.0.0.1:8380/v1   (Google Gemini API key, free tier)
    └── auto-free         → http://127.0.0.1:8399/auto/v1  (smart combo router)
                                   │
                     Connector Hub dashboard/API :8399
 ```
 
-- **3 bridges** wrap local CLIs as OpenAI-compatible chat endpoints.
+- **3 bridges** wrap local CLIs as OpenAI-compatible chat endpoints, plus a **Gemini bridge** that calls Google's free-tier API directly with your own `GOOGLE_API_KEY`.
 - **Connector Hub** registers providers, probes every free model, writes working models into Hermes config, and serves the dashboard at `http://127.0.0.1:8399/`.
 - **Auto Combo** is a virtual provider that chains the three bridges, skips quota/failing models, and forwards to the first healthy one. One request, automatic fallback.
 - **Routing brain ("think before acting"):** adaptive scoring by success rate, EWMA latency, and failure streak; circuit-breaker cooldown after 3 consecutive failures; selectable strategies `adaptive` / `fastest` / `priority` / `round_robin` via the dashboard or `POST /api/routing`. TCP preflight skips dead bridges instantly; cached routing state avoids a disk read per request.
@@ -53,6 +54,8 @@ Hermes Agent
    CLINE_BRIDGE_PROXY_KEY=<random>
    OPENCODE_BRIDGE_PROXY_KEY=<random>
    ANTI_GRAVITY_BRIDGE_PROXY_KEY=<random>
+   GEMINI_BRIDGE_PROXY_KEY=<random>
+   GOOGLE_API_KEY=<your Google AI Studio key>   # only for gemini-free
    ```
 3. Register providers and probe:
    ```
@@ -110,6 +113,7 @@ connector/connector.py                hub core: state, probes, sync, auto-combo,
 bridges/cline-bridge/proxy/proxy.py   Cline CLI bridge (8378)
 bridges/opencode-bridge/proxy/proxy.py  OpenCode CLI bridge (8377)
 bridges/antigravity-bridge/proxy/proxy.py  agy CLI bridge (8379)
+bridges/gemini-bridge/proxy/proxy.py       Google Gemini API bridge (8380)
 scripts/run-hidden.vbs                hidden launcher for autostart
 tests/smoke_test.ps1                  syntax + connectivity verification
 install.ps1                           installer helper

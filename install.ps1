@@ -19,7 +19,10 @@ $map = @(
   @('connector\connector.py', 'connector\connector.py'),
   @('bridges\cline-bridge\proxy\proxy.py', 'cline-bridge\proxy\proxy.py'),
   @('bridges\opencode-bridge\proxy\proxy.py', 'opencode-bridge\proxy\proxy.py'),
-  @('bridges\antigravity-bridge\proxy\proxy.py', 'antigravity-bridge\proxy\proxy.py')
+  @('bridges\antigravity-bridge\proxy\proxy.py', 'antigravity-bridge\proxy\proxy.py'),
+  @('bridges\antigravity-bridge\proxy\start-proxy.cmd', 'antigravity-bridge\proxy\start-proxy.cmd'),
+  @('bridges\gemini-bridge\proxy\proxy.py', 'gemini-bridge\proxy\proxy.py'),
+  @('bridges\gemini-bridge\proxy\start-proxy.cmd', 'gemini-bridge\proxy\start-proxy.cmd')
 )
 foreach ($m in $map) {
   $src = Join-Path $repo $m[0]
