@@ -87,6 +87,7 @@ PROBE_TIMEOUT_S = int(os.environ.get("CONNECTOR_PROBE_TIMEOUT", "120"))
 
 # Dashboard/service engine state (process-local; cross-process safety via state_lock)
 ENGINE = {"busy": False, "current": "", "updated_at": None}
+_HERMES_VERIFY = {"state": "never", "at": None, "output": "", "secs": None}
 
 DEFAULT_POLICY = {
     "free_only": True,          # only free models are shown/added
@@ -1868,205 +1869,316 @@ def cmd_autostart(args) -> int:
     return 0 if ok else 2
 
 
-DASHBOARD_HTML = """<!doctype html>
-<html><head><meta charset="utf-8"><title>Hermes Connector Hub</title>
+DASHBOARD_HTML = """
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Hermes Connector Hub</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-:root{--bg:#070b14;--bg2:#0d1424;--card:rgba(20,28,45,.78);--line:rgba(120,150,200,.16);--tx:#eaf1ff;--dim:#8fa3c4;--ok:#3ee08f;--warn:#ffc857;--bad:#ff6b7a;--acc:#6aa8ff;--violet:#a78bfa}
+:root{
+ --ink:#0a0c0c; --panel:#121616; --panel2:#171c1b; --line:#28302e; --line2:#3a4542;
+ --text:#e9e5d9; --dim:#8d9791; --amber:#ffb454; --amber2:#ff8a3d;
+ --mint:#57d6a3; --coral:#ff6b5e; --ice:#7fd4e8; --mono:ui-monospace,"SFMono-Regular","Cascadia Code",Consolas,"Liberation Mono",monospace
+}
 *{box-sizing:border-box}
-body{margin:0;font:14px/1.5 'Segoe UI',system-ui,-apple-system,sans-serif;color:var(--tx);
- background:radial-gradient(1200px 600px at 12% -10%,rgba(106,168,255,.13),transparent 60%),
-            radial-gradient(900px 500px at 88% 0%,rgba(167,139,250,.12),transparent 55%),
-            linear-gradient(180deg,var(--bg2),var(--bg) 60%);min-height:100vh}
-header{padding:16px 26px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:center;flex-wrap:wrap;
- position:sticky;top:0;z-index:5;background:rgba(7,11,20,.82);backdrop-filter:blur(18px)}
-h1{font-size:18px;margin:0;letter-spacing:.3px;font-weight:700;
- background:linear-gradient(92deg,#fff,#8fc0ff 55%,#c4a8ff);-webkit-background-clip:text;background-clip:text;color:transparent}
-.brandmark{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:9px;font-size:15px;
- background:linear-gradient(135deg,#6aa8ff,#a78bfa);box-shadow:0 0 22px rgba(106,168,255,.45)}
+html,body{margin:0;min-height:100%}
+body{
+ background:
+  repeating-linear-gradient(0deg,transparent 0 39px,rgba(255,255,255,.018) 39px 40px),
+  repeating-linear-gradient(90deg,transparent 0 39px,rgba(255,255,255,.018) 39px 40px),
+  radial-gradient(900px 520px at 8% -8%,rgba(255,180,84,.10),transparent 62%),
+  linear-gradient(180deg,#0e1111,var(--ink) 55%);
+ color:var(--text);font:13px/1.55 var(--mono);letter-spacing:.1px;
+}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:9;opacity:.16;
+ background-image:radial-gradient(rgba(255,255,255,.22) .5px,transparent .5px);background-size:3px 3px}
+header{
+ position:sticky;top:0;z-index:8;padding:13px 22px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;
+ background:rgba(10,12,12,.92);backdrop-filter:blur(14px);border-bottom:1px solid var(--line2);
+ box-shadow:0 8px 30px rgba(0,0,0,.35)
+}
+.mark{width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--amber);color:var(--amber);
+ font-size:15px;font-weight:800;box-shadow:inset 0 0 12px rgba(255,180,84,.12),0 0 14px rgba(255,180,84,.1)}
+h1{font-size:15px;margin:0;font-weight:800;letter-spacing:2.4px;text-transform:uppercase;white-space:nowrap}
+h1 span{color:var(--amber)}
+.tag{font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:var(--dim);border-left:1px solid var(--line2);padding-left:14px}
+.engine{font-size:11px;color:var(--dim);letter-spacing:.6px}
+header .spacer{flex:1}
+button{
+ background:var(--panel2);border:1px solid var(--line2);color:var(--text);border-radius:3px;
+ padding:8px 13px;cursor:pointer;font:11px var(--mono);font-weight:700;letter-spacing:1.1px;text-transform:uppercase;
+ transition:background .15s,border-color .15s,transform .12s
+}
+button:hover{border-color:var(--amber);background:#202725;transform:translateY(-1px)}
+button.primary{background:var(--amber);border-color:var(--amber);color:#17120a}
+button.primary:hover{background:var(--amber2);border-color:var(--amber2)}
+button.ghost{border-color:transparent;color:var(--dim)}
+button:disabled{opacity:.35;cursor:not-allowed;transform:none}
+input,select,textarea{
+ background:#0b0e0e;border:1px solid var(--line2);border-radius:3px;color:var(--text);
+ padding:8px 10px;font:12px var(--mono);outline:none
+}
+input:focus,select:focus,textarea:focus{border-color:var(--amber);box-shadow:0 0 0 2px rgba(255,180,84,.1)}
+main{padding:20px 22px 64px;max-width:1540px;margin:0 auto;display:grid;gap:14px}
+.card{position:relative;background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:4px;padding:16px 18px}
+.card:before{content:"";position:absolute;left:0;top:0;width:34px;height:2px;background:var(--amber)}
+.card.alt:before{background:var(--ice)}
+.card.good:before{background:var(--mint)}
+.card h2{margin:0 0 12px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);font-weight:700}
 .muted{color:var(--dim)}
-main{padding:18px 26px 50px;display:grid;gap:16px;max-width:1500px;margin:0 auto}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;
- backdrop-filter:blur(14px);box-shadow:0 10px 34px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.04);
- transition:border-color .2s,transform .2s}
-.card:hover{border-color:rgba(120,160,230,.32)}
-.toolbar{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
-button{background:rgba(255,255,255,.045);border:1px solid var(--line);color:var(--tx);border-radius:10px;
- padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600;transition:.18s;backdrop-filter:blur(6px)}
-button:hover{border-color:var(--acc);transform:translateY(-1px);box-shadow:0 6px 18px rgba(106,168,255,.18)}
-button.primary{background:linear-gradient(120deg,#2f7ef0,#7a5cf0);border-color:transparent;color:#fff;
- box-shadow:0 6px 20px rgba(78,110,240,.35)}
-button.danger{border-color:rgba(255,107,122,.5);color:var(--bad)}
-button.ok{border-color:rgba(62,224,143,.5);color:var(--ok)}
-button:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
-input,select,textarea{background:rgba(7,11,20,.7);border:1px solid var(--line);color:var(--tx);
- border-radius:10px;padding:8px 12px;font-size:13px}
-input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(106,168,255,.12)}
-.badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.4px}
-.b-ok{background:rgba(62,224,143,.14);color:var(--ok);box-shadow:0 0 14px rgba(62,224,143,.12)}
-.b-quota{background:rgba(255,200,87,.14);color:var(--warn)}
-.b-fail{background:rgba(255,107,122,.14);color:var(--bad)}
-.b-unk{background:rgba(143,163,196,.14);color:var(--dim)}
-table{width:100%;border-collapse:collapse;margin-top:8px}
-th,td{text-align:left;padding:8px 9px;border-top:1px solid var(--line);font-size:13px;vertical-align:middle}
-th{color:var(--dim);font-weight:700;border-top:none;white-space:nowrap;text-transform:uppercase;font-size:11px;letter-spacing:.6px}
-tr{transition:background .15s}tr:hover{background:rgba(255,255,255,.025)}
-code{background:rgba(7,11,20,.8);border:1px solid var(--line);border-radius:6px;padding:2px 6px;
- font:12px Consolas,monospace;color:#bcd6ff}
-.pid{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
-form{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
-label{font-size:12px;color:var(--dim);display:block;margin-bottom:4px;font-weight:600}
-.pending{background:rgba(106,168,255,.07);border:1px solid rgba(106,168,255,.3);border-radius:12px;
- padding:10px 14px;margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-#log{font:12px/1.6 Consolas,monospace;color:var(--dim);max-height:240px;overflow:auto;white-space:pre-wrap}
-.engine{font-size:12px;color:var(--dim)}
-.spin{display:inline-block;width:10px;height:10px;border:2px solid var(--acc);border-top-color:transparent;
- border-radius:50%;animation:sp .9s linear infinite;vertical-align:-1px;margin-right:6px}
-@keyframes sp{to{transform:rotate(360deg)}}
-/* ---- live stat strip ---- */
-.stats{display:flex;gap:12px;flex-wrap:wrap}
-.stat{flex:1;min-width:120px;background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:12px;
- padding:10px 14px;display:flex;flex-direction:column;gap:2px}
-.stat-num{font-size:24px;font-weight:800;line-height:1}
-.stat-lbl{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);font-weight:700}
-.stat.ok .stat-num{color:var(--ok)}.stat.q .stat-num{color:var(--warn)}
-.stat.f .stat-num{color:var(--bad)}.stat.u .stat-num{color:var(--dim)}
-/* ---- combo flow ---- */
+.mono{font-family:var(--mono)}
+.led{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:0}
+.led.ok{background:var(--mint);box-shadow:0 0 10px var(--mint)}
+.led.warn{background:var(--amber);box-shadow:0 0 10px var(--amber)}
+.led.bad{background:var(--coral);box-shadow:0 0 10px var(--coral)}
+.led.idle{background:#59635f}
+.badge{display:inline-block;padding:2px 8px;border-radius:2px;font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase;border:1px solid}
+.b-ok{color:var(--mint);border-color:rgba(87,214,163,.4);background:rgba(87,214,163,.08)}
+.b-quota{color:var(--amber);border-color:rgba(255,180,84,.4);background:rgba(255,180,84,.08)}
+.b-fail{color:var(--coral);border-color:rgba(255,107,94,.4);background:rgba(255,107,94,.08)}
+.b-unk{color:var(--dim);border-color:var(--line2);background:rgba(255,255,255,.02)}
+.grid-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(122px,1fr));gap:10px}
+.stat{border:1px solid var(--line);background:rgba(255,255,255,.02);padding:11px 13px}
+.stat .n{font-size:28px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.stat .l{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);margin-top:6px}
+.stat.ok .n{color:var(--mint)}.stat.q .n{color:var(--amber)}.stat.f .n{color:var(--coral)}
+.hero{background:linear-gradient(115deg,rgba(255,180,84,.06),rgba(127,212,232,.03));border-color:#3a3a2c}
+.hero:before{width:80px}
+.linkrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px}
+.linknode{border:1px solid var(--line2);padding:7px 12px;font-size:10px;letter-spacing:1.3px;text-transform:uppercase;background:rgba(0,0,0,.25)}
+.linknode b{color:var(--amber);font-weight:800}
+.linkline{flex:1;min-width:30px;height:1px;background:repeating-linear-gradient(90deg,var(--line2) 0 6px,transparent 6px 11px);position:relative}
+.linkline:after{content:"";position:absolute;top:-2px;left:0;width:5px;height:5px;border-radius:50%;background:var(--amber);box-shadow:0 0 10px var(--amber);animation:travel 2.4s linear infinite}
+@keyframes travel{0%{left:0;opacity:0}10%{opacity:1}90%{opacity:1}100%{left:100%;opacity:0}}
+.hchecks{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.hcheck{border:1px solid var(--line);background:rgba(0,0,0,.22);padding:8px 11px;font-size:11px;min-width:140px}
+.hcheck .k{font-size:9px;letter-spacing:1.3px;text-transform:uppercase;color:var(--dim)}
+.hcheck .v{margin-top:3px;font-weight:700}
+.verify-out{margin-top:12px;border-left:2px solid var(--mint);padding:8px 12px;background:rgba(87,214,163,.05);font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:110px;overflow:auto}
+.verify-out.fail{border-color:var(--coral);background:rgba(255,107,94,.05)}
+.bridge-strip{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.bchip{border:1px solid var(--line);padding:5px 9px;font-size:10px;letter-spacing:.5px;background:rgba(0,0,0,.22)}
+.bchip.up{border-color:rgba(87,214,163,.35)}
+.bchip.down{border-color:rgba(255,107,94,.5);color:var(--coral)}
+.chain{display:flex;align-items:stretch;gap:5px;flex-wrap:wrap;margin-top:12px}
+.node{border:1px solid var(--line2);background:rgba(0,0,0,.25);padding:9px 11px;min-width:132px;max-width:190px}
+.node.live{border-color:rgba(87,214,163,.5);box-shadow:inset 0 0 18px rgba(87,214,163,.05)}
+.node.skip{opacity:.38}
+.node .np{font-size:9px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim)}
+.node .nm{font-size:11px;color:#cfe0dc;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .st{margin-top:7px}
+.arrow{align-self:center;color:var(--amber);font-size:15px;animation:fade 1.7s ease-in-out infinite}
+@keyframes fade{0%,100%{opacity:.3}50%{opacity:1}}
 .combo-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-.chain{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:14px}
-.node{position:relative;border:1px solid var(--line);border-radius:12px;padding:9px 12px;min-width:118px;
- background:rgba(255,255,255,.035);transition:.2s}
-.node:hover{transform:translateY(-2px);border-color:var(--acc)}
-.node.live{border-color:rgba(62,224,143,.45);box-shadow:0 0 18px rgba(62,224,143,.12)}
-.node.skip{opacity:.42}
-.node .np{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim);font-weight:800}
-.node .nm{font:12px Consolas,monospace;color:#cfe1ff;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px}
-.arrow{color:var(--acc);font-size:18px;animation:flow 1.6s ease-in-out infinite}
-@keyframes flow{0%,100%{opacity:.35;transform:translateX(-2px)}50%{opacity:1;transform:translateX(2px)}}
-.hero{background:linear-gradient(120deg,rgba(106,168,255,.1),rgba(167,139,250,.06));border:1px solid rgba(106,168,255,.2)}
+.strats{display:flex;gap:5px;flex-wrap:wrap}
+.strats button{font-size:9px;padding:5px 9px}
+.toolbar{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.toolbar label{font-size:11px;letter-spacing:.5px;color:var(--dim);cursor:pointer}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--line);font-size:12px;vertical-align:middle}
+th{font-size:9px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);font-weight:700;white-space:nowrap}
+tr:hover td{background:rgba(255,255,255,.018)}
+code{background:rgba(0,0,0,.35);border:1px solid var(--line);padding:2px 5px;color:#bcd6cf;font-size:11px}
+.err{margin-top:4px;font-size:10px;color:var(--coral);white-space:normal;max-width:330px}
+.pid{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.pid .nm{font-size:14px;font-weight:800;letter-spacing:.4px}
+.pid .meta{font-size:11px;color:var(--dim);margin-top:4px}
+form{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:12px}
+label.f{display:block;font-size:9px;letter-spacing:1.3px;text-transform:uppercase;color:var(--dim);margin-bottom:4px}
+.pending{border:1px solid var(--amber);background:rgba(255,180,84,.06);padding:10px 12px;margin-top:12px;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+#log{font-size:11px;color:var(--dim);max-height:210px;overflow:auto;white-space:pre-wrap;margin-top:8px}
+.spin{display:inline-block;width:9px;height:9px;border:2px solid var(--amber);border-top-color:transparent;border-radius:50%;animation:sp .8s linear infinite;margin-right:7px}
+@keyframes sp{to{transform:rotate(360deg)}}
+footer{padding:10px 22px 26px;text-align:center;font-size:9px;letter-spacing:1.4px;text-transform:uppercase;color:#5d6863}
+footer a{color:#7e8a84;text-decoration:none;border-bottom:1px dotted #5d6863}
+footer a:hover{color:var(--amber);border-color:var(--amber)}
+@media(max-width:700px){header{padding:11px 14px}h1{font-size:12px}main{padding:14px}.tag{display:none}button{padding:7px 9px;font-size:10px}}
 </style></head>
 <body>
 <header>
- <span class="brandmark">◆</span><h1>Hermes Connector Hub</h1><span class="engine" id="engine"></span>
- <span style="flex:1"></span>
- <button class="primary" onclick="testAll()" title="Probe every free model across all connected providers to verify if they are working">⚡ Test all models</button>
- <button onclick="sweep(false,true)" title="One cheap probe per provider, respecting cooldown">Sentinel sweep</button>
- <button onclick="sweep(true,true)" title="Probes EVERY free model - consumes provider free quota!">Deep sweep</button>
+ <div class="mark">H</div>
+ <h1>Hermes <span>//</span> Connector Hub</h1>
+ <div class="tag">telemetry console</div>
+ <div class="engine" id="engine"></div>
+ <div class="spacer"></div>
+ <button class="primary" onclick="testAll()">Test all models</button>
+ <button onclick="sweep(false,true)">Sentinel</button>
+ <button onclick="sweep(true,true)">Deep sweep</button>
+ <button onclick="verifyNow()">Verify Hermes</button>
  <button onclick="restartGateway()">Restart gateway</button>
 </header>
 <main>
- <div class="card"><div class="toolbar">
-  <label style="color:var(--tx)"><input type="checkbox" id="fFree" checked onchange="render()"> Free only</label>
-  <label style="color:var(--tx)"><input type="checkbox" id="fHermes" onchange="render()"> In Hermes only</label>
-  <label style="color:var(--tx)"><input type="checkbox" id="fWork" onchange="render()"> Working only</label>
-  <span class="muted" id="updated"></span>
- </div></div>
- <div class="card">
-  <b>Add provider</b> <span class="muted">&nbsp;OpenAI-compatible base URL + API key &middot; free models only &middot; keys stored in Hermes .env</span>
-  <form onsubmit="return addProvider(event)" style="margin-top:10px">
-   <div><label>Base URL</label><input id="aUrl" placeholder="https://api.example.com/v1" style="width:100%" required></div>
-   <div><label>Auth</label>
-    <select id="aAuth" onchange="authChanged()" style="width:100%;background:#0d1117;border:1px solid var(--line);color:var(--tx);border-radius:6px;padding:6px 10px;font-size:13px">
+
+ <section class="card good">
+  <div class="combo-head"><h2 style="margin:0">Hermes connection</h2><span class="muted" id="hermesHead">checking...</span></div>
+  <div class="linkrow">
+   <div class="linknode"><b>HERMES</b> gateway</div><div class="linkline"></div>
+   <div class="linknode">Connector <b>HUB</b></div><div class="linkline"></div>
+   <div class="linknode"><b>BRIDGES</b></div><div class="linkline"></div>
+   <div class="linknode"><b>FREE MODELS</b></div>
+  </div>
+  <div class="hchecks" id="hchecks"></div>
+  <div class="bridge-strip" id="bridgeStrip"></div>
+  <div class="verify-out" id="verifyOut" hidden></div>
+ </section>
+
+ <section class="card hero">
+  <h2>Live model telemetry</h2>
+  <div class="grid-stats" id="stats"></div>
+ </section>
+
+ <section class="card alt">
+  <div class="combo-head"><h2 style="margin:0">Auto combo · failover chain</h2><code>auto-free  /  http://127.0.0.1:8399/auto/v1</code></div>
+  <div class="chain" id="chain"></div>
+  <div class="muted" style="font-size:10px;margin-top:10px">Requests are scored and sent to the healthiest model; quota or failure advances to the next node.</div>
+ </section>
+
+ <section class="card">
+  <div class="combo-head"><h2 style="margin:0">Routing brain</h2><div class="strats" id="strats"></div></div>
+  <div id="routingBody"></div>
+ </section>
+
+ <section class="card">
+  <div class="toolbar">
+   <label><input type="checkbox" id="fFree" checked onchange="render()"> Free only</label>
+   <label><input type="checkbox" id="fHermes" onchange="render()"> In Hermes only</label>
+   <label><input type="checkbox" id="fWork" onchange="render()"> Working only</label>
+   <span class="muted" id="updated"></span>
+  </div>
+ </section>
+
+ <section class="card">
+  <h2>Register provider</h2>
+  <span class="muted">OpenAI-compatible endpoint + key. Keys stay in Hermes .env. Free models only.</span>
+  <form onsubmit="return addProvider(event)">
+   <div><label class="f">Base URL</label><input id="aUrl" placeholder="https://api.example.com/v1" style="width:100%" required></div>
+   <div><label class="f">Auth</label>
+    <select id="aAuth" onchange="authChanged()" style="width:100%">
      <option value="static">API key (static)</option>
-     <option value="oauth">OAuth login (device flow)</option>
-     <option value="oauth_store">OAuth token store (companion-managed)</option>
+     <option value="oauth">OAuth device flow</option>
+     <option value="oauth_store">OAuth token store</option>
     </select></div>
-   <div><label id="aKeyLbl">API key</label><input id="aKey" type="password" placeholder="sk-..." style="width:100%"></div>
-   <div><label>Slug (unique)</label><input id="aName" placeholder="my-provider" required></div>
-   <div style="grid-column:1/-1" id="aOauthRow" hidden><label>OAuth config (JSON: device_authorization_url, token_url, client_id, scope, audience)</label><textarea id="aOauth" rows="3" placeholder='{"device_authorization_url":"https://provider/oauth/device_authorize","token_url":"https://provider/oauth/token","client_id":"...","scope":"..."}' style="width:100%;background:#0d1117;border:1px solid var(--line);color:var(--tx);border-radius:6px;padding:6px 10px;font:12px Consolas,monospace"></textarea></div>
-   <div style="grid-column:1/-1" id="aStoreRow" hidden><label>Token store path (companion-managed, e.g. a bridge's tokens.json)</label><input id="aStore" placeholder="C:\\Users\\me\\.provider\\tokens.json" style="width:100%"></div>
-   <div style="grid-column:1/-1" id="aHermesRow" hidden><label>Hermes endpoint (optional: URL Hermes should use; leave empty for monitor-only oauth providers)</label><input id="aHermesUrl" placeholder="http://127.0.0.1:8380/v1" style="width:100%"></div>
-   <div><label>Model ids (optional; for APIs without /v1/models)</label><input id="aModels" placeholder="free-model-1,free-model-2" style="width:100%"></div>
+   <div><label class="f" id="aKeyLbl">API key</label><input id="aKey" type="password" placeholder="sk-..." style="width:100%"></div>
+   <div><label class="f">Slug</label><input id="aName" placeholder="my-provider" style="width:100%" required></div>
+   <div style="grid-column:1/-1" id="aOauthRow" hidden><label class="f">OAuth config JSON</label><textarea id="aOauth" rows="3" style="width:100%"></textarea></div>
+   <div style="grid-column:1/-1" id="aStoreRow" hidden><label class="f">Token store path</label><input id="aStore" style="width:100%"></div>
+   <div style="grid-column:1/-1" id="aHermesRow" hidden><label class="f">Hermes endpoint</label><input id="aHermesUrl" placeholder="http://127.0.0.1:8380/v1" style="width:100%"></div>
+   <div><label class="f">Model ids (optional)</label><input id="aModels" placeholder="free-model-1,free-model-2" style="width:100%"></div>
    <div style="grid-column:1/-1"><button class="primary" type="submit">Add &amp; probe</button> <span class="muted" id="addmsg"></span></div>
   </form>
- </div>
+ </section>
+
  <div id="providers"></div>
- <div class="card"><b>Activity log</b><div id="log" class="muted"></div></div>
+
+ <section class="card">
+  <h2>Activity log</h2><div id="log" class="muted"></div>
+ </section>
 </main>
+<footer><a href="https://deerflow.tech" target="_blank" rel="noopener">Created By Deerflow</a></footer>
 <script>
-let S=null;
+let S=null,H=null;
 async function j(u,o){const r=await fetch(u,o);let d={};try{d=await r.json()}catch(e){}if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d}
 async function post(u,b){return j(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})})}
-function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function refresh(){try{S=await j('/status');let L={lines:''};try{L=await j('/api/logs')}catch(e){}let R={};try{R=await j('/api/routing')}catch(e){}render(L.lines,R)}catch(e){document.getElementById('updated').textContent='error: '+e.message}}
+function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+function ago(t){if(!t)return '-';const d=Date.parse(t);if(isNaN(d))return t;const s=Math.floor((Date.now()-d)/1000);if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'}
+async function refresh(){
+ try{
+  S=await j('/status');
+  try{H=await j('/api/hermes')}catch(e){}
+  let L={lines:''};try{L=await j('/api/logs')}catch(e){}
+  let R={};try{R=await j('/api/routing')}catch(e){}
+  render(L.lines,R,H);
+ }catch(e){document.getElementById('updated').textContent='error: '+e.message}
+}
+function verifyNow(){post('/api/hermes/verify').then(()=>{if(H)H.verify={state:'running',at:new Date().toISOString()};render();setTimeout(refresh,2500)}).catch(e=>alert(e.message))}
 function setStrategy(s){post('/api/routing',{strategy:s}).then(refresh).catch(e=>alert(e.message))}
-function sweep(deep,force){if(deep&&!confirm('Deep sweep probes EVERY free model and consumes provider free quota. Continue?'))return;post('/api/sweep',{deep:deep,force:force}).then(refresh).catch(e=>alert(e.message))}
+function sweep(deep,force){if(deep&&!confirm('Deep sweep probes EVERY free model and consumes provider quota. Continue?'))return;post('/api/sweep',{deep:deep,force:force}).then(refresh).catch(e=>alert(e.message))}
 function testAll(){post('/api/sweep',{deep:true,force:true}).then(()=>{if(S&&S.engine){S.engine.busy=true;S.engine.current='all providers'}render()}).catch(e=>alert(e.message))}
 function restartGateway(){if(!confirm('Restart the Hermes gateway now?'))return;post('/api/restart-gateway').then(()=>alert('Gateway restart started')).catch(e=>alert(e.message))}
 function retryModel(m){post('/api/retry',{model:m}).then(refresh).catch(e=>alert(e.message))}
-function removeProvider(s){if(!confirm('Remove provider "'+s+'" from Hermes and connector state?'))return;post('/api/remove',{slug:s}).then(refresh).catch(e=>alert(e.message))}
+function removeProvider(s){if(!confirm('Remove provider '+s+' from Hermes and connector state?'))return;post('/api/remove',{slug:s}).then(refresh).catch(e=>alert(e.message))}
 function decide(s,d){post('/api/decide',{slug:s,decision:d}).then(refresh).catch(e=>alert(e.message))}
-function startOauth(s){addmsg.textContent='oauth login started for '+s+' ...';post('/api/oauth-login',{slug:s}).then(()=>{addmsg.textContent='oauth login running - check the provider card for the user code';refresh()}).catch(e=>{addmsg.textContent='';alert(e.message)})}
-function authChanged(){const m=aAuth.value;aOauthRow.hidden=m!=='oauth';aStoreRow.hidden=m!=='oauth_store';aHermesRow.hidden=m==='static';aKeyLbl.textContent=m==='static'?'API key':(m==='oauth'?'API key (optional; oauth only)':'API key (bridge key, optional)')}
+function startOauth(s){addmsg.textContent='oauth login started for '+s;post('/api/oauth-login',{slug:s}).then(()=>{addmsg.textContent='login running - check the provider card';refresh()}).catch(e=>{addmsg.textContent='';alert(e.message)})}
+function authChanged(){const m=aAuth.value;aOauthRow.hidden=m!=='oauth';aStoreRow.hidden=m!=='oauth_store';aHermesRow.hidden=m==='static';aKeyLbl.textContent=m==='static'?'API key':(m==='oauth'?'API key (optional)':'Bridge key (optional)')}
 function addProvider(ev){ev.preventDefault();const b={url:aUrl.value.trim(),key:aKey.value.trim()||null,name:aName.value.trim(),models:aModels.value.trim()||null,auth:aAuth.value,token_store:aStore.value.trim()||null,hermes_url:aHermesUrl.value.trim()||null};
- if(aAuth.value==='oauth'){const c=aOauth.value.trim();if(!c){addmsg.textContent='oauth config JSON is required for oauth mode';return false}try{b.oauth_config=JSON.parse(c)}catch(e){addmsg.textContent='oauth config is not valid JSON';return false}}
- if(aAuth.value==='static'&&!b.key){addmsg.textContent='';alert('API key is required for static providers');return false}
- addmsg.textContent='registering + probing in background...';post('/api/add',b).then(()=>{addmsg.textContent='added - probing; the provider card will show Keep/Delete when done';refresh()}).catch(e=>{addmsg.textContent='';alert(e.message)});return false}
-function render(logText,R){
- R=R||{};
- updated.textContent='updated '+new Date().toLocaleTimeString()+(S&&S.last_model_refresh?(' · catalog '+esc(S.last_model_refresh.replace('T',' ').replace('Z',''))):'');
- engine.innerHTML=(S&&S.engine&&S.engine.busy)?('<span class="spin"></span>testing: '+esc(S.engine.current||'...')):'idle';
+ if(aAuth.value==='oauth'){const c=aOauth.value.trim();if(!c){addmsg.textContent='oauth config JSON required';return false}try{b.oauth_config=JSON.parse(c)}catch(e){addmsg.textContent='invalid oauth JSON';return false}}
+ if(aAuth.value==='static'&&!b.key){addmsg.textContent='API key required';return false}
+ addmsg.textContent='registering + probing...';post('/api/add',b).then(()=>{addmsg.textContent='added - probing';refresh()}).catch(e=>{addmsg.textContent='';alert(e.message)});return false}
+
+function renderHermes(){
+ const box=document.getElementById('hchecks'),strip=document.getElementById('bridgeStrip'),vout=document.getElementById('verifyOut');
+ if(!H){document.getElementById('hermesHead').textContent='checking...';return}
+ const g=H.gateway||{},bridges=H.bridges||[],cfg=H.config_providers||[];
+ const up=g.up,alive=bridges.filter(x=>x.alive).length,all=bridges.length;
+ const ok=up&&alive===all&&(H.verify?.state!=='fail');
+ document.getElementById('hermesHead').innerHTML='<span class="led '+(ok?'ok':'warn')+'"></span>'+(ok?'LINK ACTIVE':'CHECK LINK');
+ box.innerHTML=
+  '<div class="hcheck"><div class="k">Gateway process</div><div class="v"><span class="led '+(up?'ok':'bad')+'"></span>'+(up?'UP · PID '+esc(g.pid):'DOWN')+'</div></div>'+
+  '<div class="hcheck"><div class="k">Bridges online</div><div class="v"><span class="led '+(alive===all?'ok':'warn')+'"></span>'+alive+' / '+all+'</div></div>'+
+  '<div class="hcheck"><div class="k">Hermes config</div><div class="v"><span class="led '+(cfg.length>=4?'ok':'warn')+'"></span>'+cfg.length+' providers synced</div></div>'+
+  '<div class="hcheck"><div class="k">Global default</div><div class="v"><span class="led ok"></span>'+esc(H.default_global||'unchanged')+'</div></div>';
+ strip.innerHTML=bridges.map(x=>'<span class="bchip '+(x.alive?'up':'down')+'"><span class="led '+(x.alive?'ok':'bad')+'"></span>'+esc(x.slug)+' · '+x.models+'</span>').join('');
+ const v=H.verify||{};
+ if(v.state&&v.state!=='never'){
+  vout.hidden=false;vout.className='verify-out'+(v.state==='fail'?' fail':'');
+  vout.innerHTML='<b>E2E verify · '+esc(v.state.toUpperCase())+'</b> '+(v.secs!=null?v.secs+'s':'')+' · '+ago(v.at)+'\\n'+esc(v.output||'no output');
+ }else{vout.hidden=true}
+}
+function render(logText,R,H){
+ R=R||{};renderHermes();
+ document.getElementById('updated').textContent='updated '+new Date().toLocaleTimeString()+(S&&S.last_model_refresh?(' · catalog '+ago(S.last_model_refresh)):'');
+ document.getElementById('engine').innerHTML=(S&&S.engine&&S.engine.busy)?('<span class="spin"></span>'+esc(S.engine.current||'working')):'idle';
  const showFree=fFree.checked,showHermes=fHermes.checked,showWork=fWork.checked;
+ // stat strip
+ let tot={ok:0,quota:0,fail:0,unknown:0,total:0};
+ for(const c of Object.values((S&&S.summary)||{})){tot.ok+=c.ok;tot.quota+=c.quota;tot.fail+=c.fail;tot.unknown+=c.unknown;tot.total+=c.total}
+ document.getElementById('stats').innerHTML=
+  '<div class="stat ok"><div class="n">'+tot.ok+'</div><div class="l">Working</div></div>'+
+  '<div class="stat q"><div class="n">'+tot.quota+'</div><div class="l">Quota limited</div></div>'+
+  '<div class="stat f"><div class="n">'+tot.fail+'</div><div class="l">Failing</div></div>'+
+  '<div class="stat"><div class="n">'+tot.unknown+'</div><div class="l">Unknown</div></div>'+
+  '<div class="stat"><div class="n">'+tot.total+'</div><div class="l">Total models</div></div>';
+ // combo chain
+ const chain=(S&&S.combos&&S.combos['free-auto']&&S.combos['free-auto'].chain)||[];
+ document.getElementById('chain').innerHTML=chain.map((e,i)=>{
+  const p=(S.providers||{})[e.provider]||{},rec=(p.models||{})[e.model]||{};
+  const st=rec.status||'unknown';
+  const cls=st==='working'?'live':((st==='quota'||st==='failing')?'skip':'');
+  const badge=st==='working'?'b-ok':(st==='quota'?'b-quota':(st==='failing'?'b-fail':'b-unk'));
+  return (i?'<span class="arrow">›</span>':'')+'<div class="node '+cls+'"><div class="np">'+esc(e.provider)+'</div><div class="nm" title="'+esc(e.model)+'">'+esc(e.model)+'</div><div class="st"><span class="badge '+badge+'">'+esc(st)+'</span></div></div>';
+ }).join('')||'<span class="muted">no chain configured</span>';
+ // routing brain
+ const strat=R.strategy||'adaptive';
+ document.getElementById('strats').innerHTML=['adaptive','fastest','priority','round_robin'].map(o=>'<button data-s="'+o+'" class="'+(o===strat?'primary':'')+'" onclick="setStrategy(this.dataset.s)">'+o+'</button>').join('');
+ const stats=R.stats||{};
+ let rows='';for(const [m,s] of Object.entries(stats)){
+  const cb=(s.cooldown_until||0)>Date.now()/1000;
+  rows+='<tr><td><code>'+esc(m)+'</code></td><td>'+(s.ok||0)+' / '+(s.fail||0)+'</td><td>'+(s.avg_ms?s.avg_ms+'ms':'-')+'</td><td>'+(cb?'<span class="badge b-fail">cooldown</span>':'<span class="badge b-ok">ready</span>')+'</td></tr>';
+ }
+ document.getElementById('routingBody').innerHTML='<div class="muted" style="font-size:10px">Strategy '+esc(strat)+' · attempt timeout '+(R.attempt_timeout||35)+'s · '+Object.keys(stats).length+' scored models</div>'+
+  (rows?'<table><tr><th>Model</th><th>OK / Fail</th><th>Avg latency</th><th>State</th></tr>'+rows+'</table>':'<div class="muted" style="margin-top:8px;font-size:10px">No routing data yet - send a request to auto.</div>');
+ // providers
  let html='';
- if(S&&S.summary){let tot={ok:0,quota:0,fail:0,unknown:0,total:0};for(const [slug,c] of Object.entries(S.summary)){tot.ok+=c.ok;tot.quota+=c.quota;tot.fail+=c.fail;tot.unknown+=c.unknown;tot.total+=c.total;}
-  html+='<div class="card hero"><div class="stats">'
-   +'<div class="stat ok"><span class="stat-num">'+tot.ok+'</span><span class="stat-lbl">Working</span></div>'
-   +'<div class="stat q"><span class="stat-num">'+tot.quota+'</span><span class="stat-lbl">Quota</span></div>'
-   +'<div class="stat f"><span class="stat-num">'+tot.fail+'</span><span class="stat-lbl">Failed</span></div>'
-   +'<div class="stat u"><span class="stat-num">'+tot.unknown+'</span><span class="stat-lbl">Unknown</span></div>'
-   +'<div class="stat"><span class="stat-num">'+tot.total+'</span><span class="stat-lbl">Total models</span></div>'
-   +'</div></div>';}
- // ---- smart combo chain ----
- let chain=(S&&S.combos&&S.combos['free-auto']&&S.combos['free-auto'].chain)||[];
- if(chain.length){let nodes='';chain.forEach((e,i)=>{
-   const p=(S.providers||{})[e.provider]||{};const rec=(p.models||{})[e.model]||{};
-   const st=rec.status||'unknown';const cls=st==='working'?'live':(st==='quota'||st==='failing'?'skip':'');
-   const bcls={working:'b-ok',quota:'b-quota',failing:'b-fail'}[st]||'b-unk';
-   nodes+=(i?'<span class="arrow">➜</span>':'')+'<div class="node '+cls+'" title="'+esc(e.provider)+'">'
-     +'<div class="np">'+esc(e.provider)+'</div><div class="nm">'+esc(e.model)+'</div>'
-     +'<div style="margin-top:6px"><span class="badge '+bcls+'">'+(st==='working'?'OK':st.toUpperCase())+'</span></div></div>';
-  });
-  html+='<div class="card"><div class="combo-head"><div><b>◆ Auto Combo</b> <span class="muted">&nbsp;one endpoint, automatic fallback across providers</span></div>'
-   +'<code>auto-free  ·  http://127.0.0.1:8399/auto/v1</code></div><div class="chain">'+nodes+'</div>'
-   +'<div class="muted" style="font-size:11px;margin-top:10px">Hermes sends one request to <code>auto</code>; the router scores candidates and forwards to the best healthy model.</div></div>';
- }
- // ---- routing brain ----
- if(R&&R.strategy){const strat=R.strategy;const stats=R.stats||{};
-  const opts=['adaptive','fastest','priority','round_robin'];
-  let btns=opts.map(o=>'<button data-s="'+o+'" onclick="setStrategy(this.dataset.s)" class="'+(o===strat?'primary':'')+'" style="padding:5px 10px;font-size:11px">'+o+'</button>').join(' ');
-  let rows='';for(const [m,s] of Object.entries(stats)){const ok=s.ok||0,fail=s.fail||0,avg=s.avg_ms||0;
-   const cb=(s.cooldown_until||0)>Date.now()/1000;
-   rows+='<tr><td><code>'+esc(m)+'</code></td><td>'+ok+' / '+fail+'</td><td>'+(avg?avg+'ms':'-')+'</td><td>'+(cb?'<span class="badge b-fail">COOLDOWN</span>':'<span class="badge b-ok">ready</span>')+'</td></tr>';}
-  html+='<div class="card"><div class="combo-head"><div><b>🧠 Routing brain</b> <span class="muted">&nbsp;think before acting · attempt timeout '+(R.attempt_timeout||35)+'s</span></div><div>'+btns+'</div></div>'
-   +(rows?'<table><tr><th>Model</th><th>OK / Fail</th><th>Avg latency</th><th>State</th></tr>'+rows+'</table>':'<div class="muted" style="margin-top:10px">No routing data yet — send a request to <code>auto</code>.</div>')+'</div>';
- }
- for(const [slug,p] of Object.entries(S.providers||{})){
+ for(const [slug,p] of Object.entries((S&&S.providers)||{})){
   const rows=[];
   for(const [mid,rec] of Object.entries(p.models||{})){
    if(showFree&&rec.free===false)continue;
    if(showHermes&&!rec.in_hermes)continue;
    if(showWork&&rec.status!=='working')continue;
    const cls={working:'b-ok',quota:'b-quota',failing:'b-fail'}[rec.status]||'b-unk';
-   const lbl={working:'OK',quota:'QUOTA',failing:'FAIL'}[rec.status]||'UNKNOWN';
    const ms=(rec.reply&&rec.reply.ms!=null)?rec.reply.ms+'ms':'-';
    const tool=(rec.tool&&rec.tool.ok)?('tools:'+(rec.tool.mode||'ok')):'tools:-';
-   const lp=(rec.last_probed||'').replace('T',' ').replace('Z','');
-   const retr=rec.status!=='working'?'<button onclick="retryModel(\\''+esc(mid)+'\\')">Retry</button>':'';
-   const err=(rec.error)?('<div class="muted" style="font-size:11px;white-space:normal">'+esc(String(rec.error).slice(0,160))+'</div>'):'';
-   rows.push('<tr><td><code>'+esc(mid)+'</code>'+err+'</td><td><span class="badge '+cls+'">'+lbl+'</span>'+(rec.account_limit?' <span class="muted" title="provider-wide free-usage limit">(account)</span>':'')+'</td><td>'+esc(ms)+'</td><td>'+esc(tool)+'</td><td class="muted">'+esc(lp)+'</td><td>'+(rec.in_hermes?'in-hermes':'&mdash;')+'</td><td>'+retr+'</td></tr>');
+   const retr=rec.status!=='working'?'<button onclick="retryModel(this.dataset.m)" data-m="'+esc(mid)+'">Retry</button>':'';
+   const err=rec.error?('<div class="err">'+esc(String(rec.error).slice(0,150))+'</div>'):'';
+   rows.push('<tr><td><code>'+esc(mid)+'</code>'+err+'</td><td><span class="badge '+cls+'">'+esc(rec.status||'unknown')+'</span></td><td>'+esc(ms)+'</td><td>'+esc(tool)+'</td><td>'+ago(rec.last_probed)+'</td><td>'+(rec.in_hermes?'<span class="badge b-ok">in hermes</span>':'&mdash;')+'</td><td>'+retr+'</td></tr>');
   }
   if(!rows.length)continue;
-  const pend=p.pending_decision?'<div class="pending"><b>Probe finished.</b>&nbsp;Keep <code>'+esc(slug)+'</code> in Hermes? <button class="ok" onclick="decide(\\''+esc(slug)+'\\',\\'keep\\')">Keep</button> <button class="danger" onclick="decide(\\''+esc(slug)+'\\',\\'delete\\')">Delete</button></div>':'';
-  const mo=p.monitor_only?' <span class="badge b-unk">monitor-only</span>':(p.hermes_url?' <span class="badge b-ok">hermes-bridge</span>':'');
-  const tk=p.auth==='oauth'?(p.token&&p.token.present?('token '+esc(p.key_masked)+' &middot; refresh '+(p.token.refresh?'yes':'no')):'<span class="muted">no token yet</span>'):(p.auth==='oauth_store'?(p.token_store_state&&p.token_store_state.present?('store OK'+(p.token_store_state.email?' ('+esc(p.token_store_state.email)+')':'')):'<span class="muted">store empty</span>'):'');
-  const oa=p.auth==='oauth'?('<div class="pending"><b>OAuth:</b> '+tk+' &nbsp;<button onclick="startOauth(\\''+esc(slug)+'\\')">'+((p.oauth_login&&p.oauth_login.status==='waiting')?'Login running...':'Login (device flow)')+'</button>'+
-   (p.oauth_login?('<div class="muted" style="width:100%">'+esc(p.oauth_login.status||'')+(p.oauth_login.user_code?' &middot; user code <code>'+esc(p.oauth_login.user_code)+'</code>':'')+(p.oauth_login.verification_uri?' &middot; <a href="'+esc(p.oauth_login.verification_uri)+'">'+esc(p.oauth_login.verification_uri)+'</a>':'')+(p.oauth_login.message?' &middot; '+esc(p.oauth_login.message):'')+'</div>'):'')+'</div>'):'';
-  html+='<div class="card"><div class="pid"><div><b>'+esc(p.name||slug)+'</b> <span class="muted">['+esc(slug)+']</span><br><span class="muted">'+esc(p.url)+' &middot; key '+esc(p.key_masked||'(none)')+' &middot; auth '+esc(p.auth||'static')+mo+'</span></div><div><button class="danger" onclick="removeProvider(\\''+esc(slug)+'\\')">Remove</button></div></div>'+oa+pend+'<table><tr><th>Model (raw id)</th><th>Status</th><th>Reply</th><th>Tools</th><th>Last probed</th><th>Hermes</th><th></th></tr>'+rows.join('')+'</table></div>';
+  const pend=p.pending_decision?'<div class="pending"><b>Probe finished.</b> Keep '+esc(slug)+' in Hermes? <button class="ok" onclick="decide(this.dataset.s,\\'keep\\')" data-s="'+esc(slug)+'">Keep</button> <button class="danger" onclick="decide(this.dataset.s,\\'delete\\')" data-s="'+esc(slug)+'">Delete</button></div>':'';
+  const oa=p.auth==='oauth'?('<div class="pending"><b>OAuth:</b> '+((p.token&&p.token.present)?'token present':'no token')+' <button onclick="startOauth(this.dataset.s)" data-s="'+esc(slug)+'">Login</button></div>'):'';
+  html+='<div class="card"><div class="pid"><div><div class="nm">'+esc(p.name||slug)+' <span class="muted">['+esc(slug)+']</span></div><div class="meta">'+esc(p.url)+' · key '+esc(p.key_masked||'none')+' · '+esc(p.auth||'static')+'</div></div><div><button class="danger" onclick="removeProvider(this.dataset.s)" data-s="'+esc(slug)+'">Remove</button></div></div>'+oa+pend+'<table><tr><th>Model (raw id)</th><th>Status</th><th>Reply</th><th>Tools</th><th>Probed</th><th>Hermes</th><th></th></tr>'+rows.join('')+'</table></div>';
  }
- providers.innerHTML=html||'<div class="card muted">no providers match the filters</div>';
- if(logText!=null)log_.textContent=logText;
+ document.getElementById('providers').innerHTML=html||'<div class="card muted">no providers match the filters</div>';
+ if(logText!=null)document.getElementById('log').textContent=logText;
 }
-const log_=document.getElementById('log');
 refresh();setInterval(refresh,5000);
 </script></body></html>
 """
@@ -2270,6 +2382,73 @@ def combo_sse(data: dict) -> str:
     return lines + "data: [DONE]\n\n"
 
 
+def hermes_connection_status() -> dict:
+    """Live view of the Hermes <-> hub connection for the dashboard."""
+    st = state_load()
+    bridges = []
+    for slug, p in st.get("providers", {}).items():
+        url = p.get("hermes_url") or p.get("url") or ""
+        bridges.append({"slug": slug, "name": p.get("name") or slug, "url": url,
+                        "alive": tcp_alive(url, 0.8),
+                        "models": len(p.get("models") or {})})
+    # lightweight config parse (no PyYAML dependency in the runtime)
+    cfg_providers: list[str] = []
+    global_model = ""
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8", errors="replace") as fh:
+            in_providers = False
+            for raw in fh:
+                line = raw.rstrip("\r\n")
+                if line.startswith("providers:"):
+                    in_providers = True
+                    continue
+                if in_providers and line.startswith("  ") and not line.startswith("    ") \
+                        and line.strip().endswith(":"):
+                    cfg_providers.append(line.strip().rstrip(":"))
+                elif in_providers and line and not line.startswith(" "):
+                    in_providers = False
+                if line.startswith("model:"):
+                    global_model = line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    gateway = {"up": False, "pid": None}
+    try:
+        ps = ("Get-CimInstance Win32_Process -Filter \"Name like '%python%'\" | "
+              "Where-Object { $_.CommandLine -match 'gateway run' } | "
+              "Select-Object -First 1 -ExpandProperty ProcessId")
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                             capture_output=True, text=True, timeout=8)
+        lines = [x.strip() for x in (out.stdout or "").splitlines() if x.strip().isdigit()]
+        if lines:
+            gateway = {"up": True, "pid": int(lines[0])}
+    except Exception:
+        pass
+    return {"gateway": gateway, "bridges": bridges, "config_providers": cfg_providers,
+            "global_model": global_model, "verify": dict(_HERMES_VERIFY),
+            "default_global": "unchanged" if not global_model else global_model}
+
+
+def verify_hermes_bg() -> None:
+    """Run a real chat through Hermes and record the result."""
+    global _HERMES_VERIFY
+    _HERMES_VERIFY = {"state": "running", "at": utcnow(), "output": "", "secs": None}
+    t0 = time.monotonic()
+    try:
+        out = subprocess.run(
+            ["hermes", "-z", "Reply with only: CONNECTOR_OK",
+             "--provider", "auto-free", "-m", "auto"],
+            capture_output=True, text=True, timeout=150, shell=True)
+        text = ((out.stdout or "") + (out.stderr or "")).strip()
+        ok = out.returncode == 0 and bool(text)
+        _HERMES_VERIFY = {"state": "ok" if ok else "fail", "at": utcnow(),
+                          "output": text[-400:], "secs": int(time.monotonic() - t0)}
+    except Exception as e:
+        _HERMES_VERIFY = {"state": "fail", "at": utcnow(),
+                          "output": f"{type(e).__name__}: {e}",
+                          "secs": int(time.monotonic() - t0)}
+    log(f"hermes verify -> {_HERMES_VERIFY['state']} ({_HERMES_VERIFY['secs']}s)")
+
+
 def cmd_serve(args) -> int:
     """Connector Hub: dashboard UI + JSON API on 127.0.0.1:8399."""
     srv_state = {"restarting": False}
@@ -2423,6 +2602,8 @@ def cmd_serve(args) -> int:
                     for m in combo_models(state_load())]})
             if path == "/api/logs":
                 return self._send(200, {"lines": tail_log()})
+            if path == "/api/hermes":
+                return self._send(200, hermes_connection_status())
             if path == "/api/routing":
                 st = state_load()
                 routing = st.setdefault("routing", {"strategy": "adaptive", "stats": {}})
@@ -2452,6 +2633,11 @@ def cmd_serve(args) -> int:
                 _ROUTE_CACHE["at"] = 0.0  # invalidate cache
                 log(f"combo strategy -> {strategy}")
                 return self._send(200, {"strategy": strategy})
+            if path == "/api/hermes/verify":
+                if _HERMES_VERIFY.get("state") == "running":
+                    return self._err(409, "a Hermes verification is already running")
+                bg(verify_hermes_bg)
+                return self._send(200, {"started": True})
             if path == "/api/sweep":
                 st = state_load()
                 if ENGINE["busy"]:
