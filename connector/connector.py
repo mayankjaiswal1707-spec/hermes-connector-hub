@@ -91,13 +91,15 @@ _HERMES_VERIFY = {"state": "never", "at": None, "output": "", "secs": None}
 
 DEFAULT_POLICY = {
     "free_only": True,          # only free models are shown/added
-    "auto_add_working": True,   # sync free+working(+quota) models into Hermes
+    "auto_add_working": True,   # sync free models into Hermes
     "lenient_failures": True,   # failing models kept in state, retry later
     "touch_default": False,     # NEVER change the global default model
+    "show_all_models": True,    # list every free model in Hermes (incl. quota/failing)
 }
 
 DEFAULT_POLICY_COMMENT = {
     "free_only": "only free models are eligible for Hermes",
+    "show_all_models": "list all free models in Hermes, even if quota/failing",
     "auto_add_working": "write free+working(+quota) models into Hermes config",
     "lenient_failures": "failing models stay in state with retry-later, never auto-deleted",
     "touch_default": "connector never writes the global model: section",
@@ -755,6 +757,13 @@ def probe_model(url: str, model: str, key: str | None, do_tools: bool = True) ->
 def eligible_for_hermes(model_rec: dict, policy: dict) -> bool:
     if policy.get("free_only") and not model_rec.get("free"):
         return False
+    # models that vanished from upstream are never written back to Hermes
+    if model_rec.get("removed_upstream"):
+        return False
+    # show_all_models: include every free model so the desktop app's model
+    # picker lists them all (even quota/failing ones), not just working ones.
+    if policy.get("show_all_models"):
+        return True
     return model_rec.get("status") in ("working", "quota")
 
 
