@@ -864,6 +864,37 @@ SEED_PROVIDERS = {
         ],
         "key_env_added_by_connector": False,
     },
+    # freetoken.website bridge (port 8385): native pass-through. Account
+    # currently has no quota (403 insufficient balance) — models marked
+    # quota here so they auto-recover once the account is funded.
+    "freetoken-free": {
+        "name": "FreeToken Free",
+        "url": "http://127.0.0.1:8385/v1",
+        "key_env": "FREETOKEN_BRIDGE_PROXY_KEY",
+        "auth": "static",
+        "fallback_models": [
+            "freetoken/auto",
+            "freetoken/claude-5.5-opus", "freetoken/claude-5.5-sonnet", "freetoken/claude-5.5-haiku",
+            "freetoken/claude-5-opus", "freetoken/claude-5-sonnet",
+            "freetoken/gpt-5.6-sol", "freetoken/gpt-5.6-terra", "freetoken/gpt-5.6-luna", "freetoken/gpt-5.5",
+            "freetoken/DeepSeek-V4.1-Flash", "freetoken/DeepSeek-V4-Pro", "freetoken/DeepSeek-V4-Flash",
+            "freetoken/glm-5.3", "freetoken/glm-5.3-flash", "freetoken/kimi-k3",
+            "freetoken/MiniMax-M3.1-Flash", "freetoken/Qwen3.8-Flash-Next", "freetoken/Qwen3.8-27B",
+            "freetoken/step-5-preview", "freetoken/step-3.7-flash",
+            "freetoken/sensenova-6.8-flash-lite", "freetoken/sensenova-u1.5-lite",
+        ],
+        "free_override": [
+            "freetoken/auto", "freetoken/claude-5.5-opus", "freetoken/claude-5.5-sonnet",
+            "freetoken/claude-5.5-haiku", "freetoken/claude-5-opus", "freetoken/claude-5-sonnet",
+            "freetoken/gpt-5.6-sol", "freetoken/gpt-5.6-terra", "freetoken/gpt-5.6-luna",
+            "freetoken/gpt-5.5", "freetoken/DeepSeek-V4.1-Flash", "freetoken/DeepSeek-V4-Pro",
+            "freetoken/DeepSeek-V4-Flash", "freetoken/glm-5.3", "freetoken/glm-5.3-flash",
+            "freetoken/kimi-k3", "freetoken/MiniMax-M3.1-Flash", "freetoken/Qwen3.8-Flash-Next",
+            "freetoken/Qwen3.8-27B", "freetoken/step-5-preview", "freetoken/step-3.7-flash",
+            "freetoken/sensenova-6.8-flash-lite", "freetoken/sensenova-u1.5-lite",
+        ],
+        "key_env_added_by_connector": False,
+    },
     # Nous Portal free models via Hermes' own OAuth (port 8384): reads the
     # fresh agent_key from hermes/auth.json, so no key is duplicated.
     "nous-free": {
@@ -1792,6 +1823,7 @@ AUTOSTART_TASKS = [
     ("Hermes_NvidiaBridge", "nvidia-bridge.cmd"),
     ("Hermes_OpenRouterBridge", "openrouter-bridge.cmd"),
     ("Hermes_NousBridge", "nous-bridge.cmd"),
+    ("Hermes_FreeTokenBridge", "freetoken-bridge.cmd"),
 ]
 
 
@@ -1844,6 +1876,11 @@ def autostart_write_wrappers() -> None:
         "nous-bridge.cmd": (
             "@echo off\r\nrem autostart: Nous Portal bridge proxy (port 8384)\r\n"
             f"cd /d \"{os.path.join(HERMES_HOME, 'nous-bridge', 'proxy')}\"\r\n"
+            "call start-proxy.cmd\r\n"
+        ),
+        "freetoken-bridge.cmd": (
+            "@echo off\r\nrem autostart: freetoken.website bridge proxy (port 8385)\r\n"
+            f"cd /d \"{os.path.join(HERMES_HOME, 'freetoken-bridge', 'proxy')}\"\r\n"
             "call start-proxy.cmd\r\n"
         ),
     }
@@ -2560,7 +2597,8 @@ def cmd_serve(args) -> int:
                     "zhipu-free": "zhipu-bridge.cmd",
                     "nvidia-free": "nvidia-bridge.cmd",
                     "openrouter-free": "openrouter-bridge.cmd",
-                    "nous-free": "nous-bridge.cmd"}
+                    "nous-free": "nous-bridge.cmd",
+                    "freetoken-free": "freetoken-bridge.cmd"}
         last: dict[str, float] = {}
         vbs = os.path.join(CONNECTOR_DIR, "autostart", "run-hidden.vbs")
         while True:
