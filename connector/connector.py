@@ -34,9 +34,30 @@ import socket
 import subprocess
 import sys
 import socket
+import time
 import concurrent.futures as cf
 import threading
-import time
+
+
+def active_profile_config() -> str | None:
+    """Path to the desktop app's active-profile config.yaml, if any."""
+    try:
+        appdata = os.environ.get("APPDATA")
+        if not appdata:
+            return None
+        ap = os.path.join(appdata, "Hermes", "active-profile.json")
+        with open(ap, "r", encoding="utf-8", errors="replace") as f:
+            d = json.load(f)
+        profile = ((d.get("connectionProfiles") or {}).get("local")) or ""
+        if not profile:
+            return None
+        p = os.path.join(HERMES_HOME, "profiles", profile, "config.yaml")
+        return p if os.path.isfile(p) else None
+    except Exception:
+        return None
+
+
+# Detection runs after HERMES_HOME is defined (near state paths).
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -57,6 +78,7 @@ CONFIG_PATH = os.path.join(HERMES_HOME, "config.yaml")
 ENV_PATH = os.path.join(HERMES_HOME, ".env")
 LOG_PATH = os.path.join(CONNECTOR_DIR, "connector.log")
 TOKENS_DIR = os.path.join(CONNECTOR_DIR, "tokens")
+PROFILE_CONFIG_PATH = active_profile_config()
 
 
 def _load_connector_env() -> None:
@@ -767,6 +789,49 @@ def eligible_for_hermes(model_rec: dict, policy: dict) -> bool:
     return model_rec.get("status") in ("working", "quota")
 
 
+def mirror_provider_to_profile(slug: str, p: dict, models: list[str]) -> None:
+    """Keep the desktop app's active-profile config.yaml in sync too.
+
+    The Hermes Desktop app reads profiles/<active>/config.yaml, not the main
+    config.yaml — without this mirror, provider/model changes never show in
+    the app's model picker.
+    """
+    if not PROFILE_CONFIG_PATH:
+        return
+    try:
+        with open(PROFILE_CONFIG_PATH, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+        block = render_provider_block(
+            slug, p.get("name", slug), p.get("hermes_url") or p["url"],
+            p.get("hermes_key_env") or p.get("key_env") or "",
+            models[0] if models else "", models).rstrip("\n").split("\n")
+        # locate providers: section
+        prov_idx = next((i for i, l in enumerate(lines) if l.startswith("providers:")), None)
+        if prov_idx is None:
+            return
+        end_idx = next((i for i in range(prov_idx + 1, len(lines))
+                        if lines[i] and not lines[i].startswith((" ", "\t", "#"))), len(lines))
+        s = e = None
+        for i in range(prov_idx + 1, end_idx):
+            m = _PROV_LINE.match(lines[i])
+            if m and m.group(1) == slug:
+                s = i
+                break
+        if s is not None:
+            for i in range(s + 1, end_idx):
+                if _PROV_LINE.match(lines[i]) or (lines[i] and not lines[i].startswith(" ")):
+                    e = i
+                    break
+            e = e or end_idx
+            lines = lines[:s] + block + lines[e:]
+        else:
+            lines = lines[:end_idx] + block + lines[end_idx:]
+        with open(PROFILE_CONFIG_PATH, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(lines).rstrip("\n") + "\n")
+    except Exception as exc:
+        log(f"profile mirror failed for {slug}: {exc}")
+
+
 def sync_provider_to_hermes(st: dict, slug: str) -> dict:
     """Write/replace providers.<slug> in Hermes config.yaml with exactly the
     eligible (free + working/quota) models. Returns action summary."""
@@ -802,6 +867,7 @@ def sync_provider_to_hermes(st: dict, slug: str) -> dict:
     for mid, rec in models_state.items():
         if mid not in elig:
             rec["in_hermes"] = False
+    mirror_provider_to_profile(slug, p, elig)
     return {"action": "written", "models": elig, "default_model": default_model, "backup": backup}
 
 
