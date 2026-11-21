@@ -238,7 +238,7 @@ Output (choose one):
 2. {"content":"<final answer to the user>"}
 
 Rules: arguments is a JSON object ({} if none). Multiple calls in one list. Never invent tool output. If no tool needed or task complete -> {"content":"..."}.
-CRITICAL: NEVER call any of your own native tools (read_files, run_commands, editor, list_files, search_files, etc.) — they are DISABLED and such calls always fail. Only emit the JSON object itself. Do not attempt to read/write files or run commands; answer from the TRANSCRIPT only."""
+CRITICAL: You are ONLY a JSON formatter. The "TOOLS" below are virtual labels you MUST emit as JSON — they are NOT functions you can execute yourself. Never say a tool is unavailable, don't attempt to actually call/run anything. Just output the JSON object with the tool name and arguments. For "use the X tool to Y" requests, ALWAYS emit {"tool_calls":[{"name":"X","arguments":{...}}]}. NEVER answer the question yourself with facts/data/results — you have NO ability to look things up; if the user wants info a tool provides, emit the tool_calls JSON instead of a direct answer. Only output {"content":"..."} for greetings, general conversation, or final answers after tool results. Use the EXACT tool names from TOOLS. NEVER call your own native tools (read_files, run_commands, etc.) — they are DISABLED."""
 
 
 def compact_tools(tools: list) -> str:
@@ -406,9 +406,10 @@ def bad_content_when_tools(p, tools, tool_choice) -> bool:
     if not p or "tool_calls" in p or tool_choice == "none" or not tools:
         return False
     c = (p.get("content") or "").lower()
-    markers = ("unable to", "not available", "non-interactive", "session restriction",
+    markers = ("unable to", "not available", "currently available", "non-interactive", "session restriction",
                "cannot execute", "can't execute", "cannot run", "can't run", "please run",
-               "i can't", "i cannot")
+               "i can't", "i cannot", "don't have access", "do not have access", "no access to",
+               "not in my", "doesn't have", "does not have", "toolset", "not permitted")
     return any(m in c for m in markers)
 
 

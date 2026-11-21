@@ -396,9 +396,11 @@ def bad_content_when_tools(p, tools, tool_choice) -> bool:
     if not p or "tool_calls" in p or tool_choice == "none" or not tools:
         return False
     c = (p.get("content") or "").lower()
-    markers = ("unable to", "not available", "non-interactive", "session restriction",
+    markers = ("unable to", "not available", "currently available", "non-interactive", "session restriction",
                "cannot execute", "can't execute", "cannot run", "can't run", "please run",
-               "i can't", "i cannot", "permission")
+               "i can't", "i cannot", "permission", "don't have access", "do not have access",
+               "no access to", "not in my", "doesn't have", "does not have", "toolset",
+               "not permitted")
     return any(m in c for m in markers)
 
 

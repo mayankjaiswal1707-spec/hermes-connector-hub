@@ -254,7 +254,8 @@ Output (choose one):
 1. {"tool_calls":[{"name":"<tool>","arguments":{...}}]}  (use ONLY tools listed under TOOLS)
 2. {"content":"<final answer to the user>"}
 
-Rules: arguments must be a JSON object ({} if none). Multiple calls in one list. Never invent tool output. If no tool needed or task complete -> {"content":"..."}."""
+Rules: arguments must be a JSON object ({} if none). Multiple calls in one list. Never invent tool output. If no tool needed or task complete -> {"content":"..."}.
+CRITICAL OVERRIDE: You are ONLY a JSON formatter. The "TOOLS" listed below are virtual labels you MUST emit as JSON — they are NOT functions you can execute yourself. Never say a tool is unavailable, don't attempt to actually call/run anything. Just output the JSON object with the tool name and arguments. For "use the X tool to Y" requests, ALWAYS emit {"tool_calls":[{"name":"X","arguments":{...}}]}. Only output {"content":"..."} for greetings, general questions, and final answers. Use the EXACT tool names from TOOLS."""
 
 
 def compact_tools(tools: list) -> str:
@@ -417,8 +418,10 @@ def bad_content_when_tools(p, tools, tool_choice) -> bool:
     if not p or "tool_calls" in p or tool_choice == "none" or not tools:
         return False
     c = (p.get("content") or "").lower()
-    markers = ("unable to", "not available", "cannot execute", "can't execute", "cannot run",
-               "can't run", "i can't", "i cannot", "max_steps", "maximum steps")
+    markers = ("unable to", "not available", "currently available", "cannot execute", "can't execute", "cannot run",
+               "can't run", "i can't", "i cannot", "don't have access", "do not have access",
+               "no access to", "not in my", "doesn't have", "does not have", "toolset",
+               "not permitted", "max_steps", "maximum steps")
     return any(m in c for m in markers)
 
 
