@@ -2580,6 +2580,13 @@ def cmd_serve(args) -> int:
                         flags = 0x08000000 if os.name == "nt" else 0
                         subprocess.run(["wscript.exe", vbs, cmd],
                                        creationflags=flags, timeout=20)
+                        # Wait for the port to come up so we don't spawn a
+                        # duplicate on the next tick (which caused duplicate
+                        # listeners -> intermittent "operation interrupted").
+                        for _ in range(20):
+                            if tcp_alive(p["url"]):
+                                break
+                            time.sleep(0.5)
                         log(f"watchdog: restarted {slug} ({wrapper})")
             except Exception as e:
                 log(f"watchdog error: {e}")
