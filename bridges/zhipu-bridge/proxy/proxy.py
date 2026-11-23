@@ -16,6 +16,7 @@ Env:
 
 import json
 import os
+import socket
 import re
 import threading
 import time
@@ -33,6 +34,44 @@ API = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 # Only the permanently-free Flash line (paid GLM-5.x / GLM-4.x excluded).
 FREE_MODELS = ("glm-4-flash", "glm-4.7-flashx", "glm-4.7-flash", "glm-4.5-flash")
 PREFERRED = ("glm-4-flash", "glm-4.7-flashx", "glm-4.7-flash", "glm-4.5-flash")
+
+
+# ---- single-instance guard: only ONE process may bind this bridge's port ----
+def _already_running() -> bool:
+    lock = os.path.join(PROXY_DIR, "..", ".bridge.lock")
+    # A lock is only valid if the port is ACTUALLY bound. A stale lock from a
+    # killed process (or a reused PID) must never block a fresh start.
+    s = socket.socket()
+    s.settimeout(0.5)
+    try:
+        s.connect(("127.0.0.1", PORT))
+        s.close()
+        return True
+    except Exception:
+        try:
+            s.close()
+        except Exception:
+            pass
+    # port is free -> clear stale lock so _claim_lock can create a fresh one
+    try:
+        if os.path.exists(lock):
+            os.remove(lock)
+    except Exception:
+        pass
+    return False
+
+
+def _claim_lock() -> bool:
+    lock = os.path.join(PROXY_DIR, "..", ".bridge.lock")
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return _already_running()
+    except Exception:
+        return True  # fail open rather than block the bridge
 
 _stats = {"requests": 0, "tool_calls": 0, "content": 0, "errors": 0,
           "failovers": 0, "started": time.time(), "last_ms": None, "last_model": None}
@@ -377,6 +416,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    if _already_running() or not _claim_lock():
+        print("another instance is already running; exiting", flush=True)
+        return
+
     srv = ThreadingHTTPServer((BIND, PORT), Handler)
     srv.daemon_threads = True
     log(f"zhipu-bridge on http://{BIND}:{PORT}/v1 (key check: {'ON' if os.environ.get('ZHIPU_BRIDGE_PROXY_KEY') else 'OFF'})")

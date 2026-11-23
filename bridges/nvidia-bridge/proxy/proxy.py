@@ -15,6 +15,7 @@ Env:
 
 import json
 import os
+import socket
 import re
 import threading
 import time
@@ -32,6 +33,44 @@ API = "https://integrate.api.nvidia.com/v1/chat/completions"
 # Only models verified working with the provided NVIDIA NIM key.
 FREE_MODELS = ("nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3.5-bolt-e4b", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "nvidia/nemotron-3.5-super-vl-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b", "minimaxai/minimax-m3.1-flash", "meta/muse-glimmer-30b", "poolside/laguna-xs-2.1", "stepfun-ai/step-5-preview", "mistralai/mistral-large-4-1t-a52b", "google/gemma-4-31b-it")
 PREFERRED = ("minimaxai/minimax-m3.1-flash", "nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3.5-bolt-e4b", "meta/muse-glimmer-30b", "poolside/laguna-xs-2.1", "stepfun-ai/step-5-preview", "nvidia/nemotron-3-ultra-550b-a55b")
+
+
+# ---- single-instance guard: only ONE process may bind this bridge's port ----
+def _already_running() -> bool:
+    lock = os.path.join(PROXY_DIR, "..", ".bridge.lock")
+    # A lock is only valid if the port is ACTUALLY bound. A stale lock from a
+    # killed process (or a reused PID) must never block a fresh start.
+    s = socket.socket()
+    s.settimeout(0.5)
+    try:
+        s.connect(("127.0.0.1", PORT))
+        s.close()
+        return True
+    except Exception:
+        try:
+            s.close()
+        except Exception:
+            pass
+    # port is free -> clear stale lock so _claim_lock can create a fresh one
+    try:
+        if os.path.exists(lock):
+            os.remove(lock)
+    except Exception:
+        pass
+    return False
+
+
+def _claim_lock() -> bool:
+    lock = os.path.join(PROXY_DIR, "..", ".bridge.lock")
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return _already_running()
+    except Exception:
+        return True  # fail open rather than block the bridge
 
 _stats = {"requests": 0, "tool_calls": 0, "content": 0, "errors": 0,
           "failovers": 0, "started": time.time(), "last_ms": None, "last_model": None}
@@ -366,6 +405,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    if _already_running() or not _claim_lock():
+        print("another instance is already running; exiting", flush=True)
+        return
+
     srv = ThreadingHTTPServer((BIND, PORT), Handler)
     srv.daemon_threads = True
     log(f"nvidia-bridge on http://{BIND}:{PORT}/v1 (key check: {'ON' if os.environ.get('NVIDIA_BRIDGE_PROXY_KEY') else 'OFF'})")

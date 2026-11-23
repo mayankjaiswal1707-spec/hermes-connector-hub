@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import re
 import shutil
 import subprocess
@@ -31,7 +32,7 @@ PORT = int(os.environ.get("CLINE_BRIDGE_PROXY_PORT", "8378"))
 BIND = os.environ.get("CLINE_BRIDGE_PROXY_BIND", "127.0.0.1")
 CLINE_TIMEOUT = int(os.environ.get("CLINE_BRIDGE_PROXY_TIMEOUT", "90"))
 MAX_PROMPT_CHARS = int(os.environ.get("CLINE_BRIDGE_MAX_PROMPT_CHARS", "18000"))
-RETRY_PARSE_ONCE = True
+RETRY_PARSE_ONCE = False
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 PROXY_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,6 +53,44 @@ PREFERRED = (
 
 _models_cache = {"at": 0.0, "items": ()}
 _cline_lock = threading.Lock()
+
+# ---- single-instance guard: only ONE process may bind this bridge's port ----
+def _already_running() -> bool:
+    lock = os.path.join(PROXY_DIR, "..", ".bridge.lock")
+    # A lock is only valid if the port is ACTUALLY bound. A stale lock from a
+    # killed process (or a reused PID) must never block a fresh start.
+    s = socket.socket()
+    s.settimeout(0.5)
+    try:
+        s.connect(("127.0.0.1", PORT))
+        s.close()
+        return True
+    except Exception:
+        try:
+            s.close()
+        except Exception:
+            pass
+    # port is free -> clear stale lock so _claim_lock can create a fresh one
+    try:
+        if os.path.exists(lock):
+            os.remove(lock)
+    except Exception:
+        pass
+    return False
+
+
+def _claim_lock() -> bool:
+    lock = os.path.join(PROXY_DIR, "..", ".bridge.lock")
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return _already_running()
+    except Exception:
+        return True  # fail open rather than block the bridge
+
 _stats = {"requests": 0, "tool_calls": 0, "content": 0, "errors": 0,
           "retries": 0, "failovers": 0, "started": time.time(),
           "last_ms": None, "last_model": None}
@@ -556,14 +595,14 @@ class Handler(BaseHTTPRequestHandler):
         last_detail = "no attempt"
         chosen = None
         tried: list[str] = []
-        for idx, model in enumerate(candidates[:3]):
+        for idx, model in enumerate(candidates[:2]):
             tried.append(model)
             try:
                 a = self._attempt(model, prompt, tools, tool_choice)
             except subprocess.TimeoutExpired:
                 last_detail = f"timeout after {CLINE_TIMEOUT}s"
                 log(f"{model} -> timeout ({CLINE_TIMEOUT}s)")
-                if idx < len(candidates[:3]) - 1:
+                if idx < len(candidates[:2]) - 1:
                     _stats["failovers"] += 1
                 continue
             except RuntimeError as exc:
@@ -600,12 +639,12 @@ class Handler(BaseHTTPRequestHandler):
                 break
 
             last_detail = a["detail"] or a["error"] or (f"rc={a['rc']}" if a["rc"] else "empty/unusable reply")
-            if retryable_failure(a["rc"], text, a["error"], last_detail) and idx < len(candidates[:3]) - 1:
+            if retryable_failure(a["rc"], text, a["error"], last_detail) and idx < len(candidates[:2]) - 1:
                 _stats["failovers"] += 1
                 log(f"{model} -> failover ({last_detail[:120]})")
                 continue
             # non-retryable but unusable (e.g. persistent bad format) - try next anyway once
-            if idx < len(candidates[:3]) - 1:
+            if idx < len(candidates[:2]) - 1:
                 _stats["failovers"] += 1
                 log(f"{model} -> trying alternate ({last_detail[:120]})")
                 continue
@@ -688,6 +727,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    if _already_running() or not _claim_lock():
+        print("another instance is already running; exiting", flush=True)
+        return
+
     os.makedirs(WORKSPACE, exist_ok=True)
     cline_base()
     ms = free_models(force=True)

@@ -23,6 +23,7 @@ Zero runtime dependencies (stdlib only).
 
 import json
 import os
+import socket
 import re
 import shutil
 import subprocess
@@ -53,6 +54,44 @@ PREFERRED = ("gemini-3.8-flash-medium", "gemini-3.8-flash-low", "gemini-3.8-flas
 
 _models_cache = {"at": 0.0, "items": ()}
 _agy_lock = threading.Lock()
+
+# ---- single-instance guard: only ONE process may bind this bridge's port ----
+def _already_running() -> bool:
+    lock = os.path.join(PROXY_DIR, "..", ".bridge.lock")
+    # A lock is only valid if the port is ACTUALLY bound. A stale lock from a
+    # killed process (or a reused PID) must never block a fresh start.
+    s = socket.socket()
+    s.settimeout(0.5)
+    try:
+        s.connect(("127.0.0.1", PORT))
+        s.close()
+        return True
+    except Exception:
+        try:
+            s.close()
+        except Exception:
+            pass
+    # port is free -> clear stale lock so _claim_lock can create a fresh one
+    try:
+        if os.path.exists(lock):
+            os.remove(lock)
+    except Exception:
+        pass
+    return False
+
+
+def _claim_lock() -> bool:
+    lock = os.path.join(PROXY_DIR, "..", ".bridge.lock")
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return _already_running()
+    except Exception:
+        return True  # fail open rather than block the bridge
+
 _stats = {"requests": 0, "tool_calls": 0, "content": 0, "errors": 0,
           "retries": 0, "failovers": 0, "started": time.time(),
           "last_ms": None, "last_model": None}
@@ -547,7 +586,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"model '{model_req}' is not an allowed Antigravity model. Available: {avail}",
                 "invalid_request_error", 400, "model_not_allowed"), 400)
             return
-        candidates = order_models(model_req)
+        candidates = order_models(model_req)[:2]
 
         messages = payload.get("messages")
         if not isinstance(messages, list) or not messages:
@@ -706,6 +745,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    if _already_running() or not _claim_lock():
+        print("another instance is already running; exiting", flush=True)
+        return
+
     os.makedirs(WORKSPACE, exist_ok=True)
     agy_base()
     ms = free_models(force=True)
