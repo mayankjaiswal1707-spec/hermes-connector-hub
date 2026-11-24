@@ -37,25 +37,23 @@ PREFERRED = ("glm-4-flash", "glm-4.7-flashx", "glm-4.7-flash", "glm-4.5-flash")
 
 
 # ---- single-instance guard: only ONE process may bind this bridge's port ----
-def _already_running() -> bool:
-    lock = os.path.join(PROXY_DIR, "..", ".bridge.lock")
-    # A lock is only valid if the port is ACTUALLY bound. A stale lock from a
-    # killed process (or a reused PID) must never block a fresh start.
-    s = socket.socket()
-    s.settimeout(0.5)
+def _pid_alive(pid: int) -> bool:
     try:
-        s.connect(("127.0.0.1", PORT))
-        s.close()
+        os.kill(pid, 0)
         return True
     except Exception:
-        try:
-            s.close()
-        except Exception:
-            pass
-    # port is free -> clear stale lock so _claim_lock can create a fresh one
+        return False
+
+
+def _already_running() -> bool:
+    lock = os.path.join(PROXY_DIR, "..", ".bridge.lock")
+    # A live lock-holder PID means another instance is starting or running —
+    # treat it as running even before its port binds (prevents startup races).
     try:
-        if os.path.exists(lock):
-            os.remove(lock)
+        with open(lock, "r", encoding="utf-8") as f:
+            pid = int(f.read().strip())
+        if pid != os.getpid() and _pid_alive(pid):
+            return True
     except Exception:
         pass
     return False
@@ -69,9 +67,22 @@ def _claim_lock() -> bool:
         os.close(fd)
         return True
     except FileExistsError:
-        return _already_running()
+        # Another process owns the lock. If it's alive, stand down. If dead
+        # (stale lock after a crash), remove it and retry once.
+        if _already_running():
+            return False
+        try:
+            os.remove(lock)
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            return True
+        except FileExistsError:
+            return False
+        except Exception:
+            return True
     except Exception:
-        return True  # fail open rather than block the bridge
+        return True
 
 _stats = {"requests": 0, "tool_calls": 0, "content": 0, "errors": 0,
           "failovers": 0, "started": time.time(), "last_ms": None, "last_model": None}
@@ -241,6 +252,11 @@ def classify(status, err):
 
 def err_obj(msg, status=500, code=None):
     return {"error": {"message": msg, "type": "api_error", "param": None, "code": code}}
+
+
+class _NoReuseServer(ThreadingHTTPServer):
+    # Refuse a second bind on the same port at the OS level (atomic).
+    allow_reuse_address = False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -420,7 +436,11 @@ def main():
         print("another instance is already running; exiting", flush=True)
         return
 
-    srv = ThreadingHTTPServer((BIND, PORT), Handler)
+    try:
+        srv = _NoReuseServer((BIND, PORT), Handler)
+    except OSError as e:
+        print(f'port {PORT} already bound; exiting: {e}', flush=True)
+        return
     srv.daemon_threads = True
     log(f"zhipu-bridge on http://{BIND}:{PORT}/v1 (key check: {'ON' if os.environ.get('ZHIPU_BRIDGE_PROXY_KEY') else 'OFF'})")
     log(f"free models: {list(FREE_MODELS)}")

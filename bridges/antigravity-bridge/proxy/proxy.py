@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("ANTI_GRAVITY_BRIDGE_PROXY_PORT", "8379"))
 BIND = os.environ.get("ANTI_GRAVITY_BRIDGE_PROXY_BIND", "127.0.0.1")
-AGY_TIMEOUT = int(os.environ.get("ANTI_GRAVITY_BRIDGE_PROXY_TIMEOUT", "110"))
+AGY_TIMEOUT = int(os.environ.get("ANTI_GRAVITY_BRIDGE_PROXY_TIMEOUT", "150"))
 MAX_PROMPT_CHARS = int(os.environ.get("ANTI_GRAVITY_BRIDGE_MAX_PROMPT_CHARS", "18000"))
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
@@ -56,25 +56,23 @@ _models_cache = {"at": 0.0, "items": ()}
 _agy_lock = threading.Lock()
 
 # ---- single-instance guard: only ONE process may bind this bridge's port ----
-def _already_running() -> bool:
-    lock = os.path.join(PROXY_DIR, "..", ".bridge.lock")
-    # A lock is only valid if the port is ACTUALLY bound. A stale lock from a
-    # killed process (or a reused PID) must never block a fresh start.
-    s = socket.socket()
-    s.settimeout(0.5)
+def _pid_alive(pid: int) -> bool:
     try:
-        s.connect(("127.0.0.1", PORT))
-        s.close()
+        os.kill(pid, 0)
         return True
     except Exception:
-        try:
-            s.close()
-        except Exception:
-            pass
-    # port is free -> clear stale lock so _claim_lock can create a fresh one
+        return False
+
+
+def _already_running() -> bool:
+    lock = os.path.join(PROXY_DIR, "..", ".bridge.lock")
+    # A live lock-holder PID means another instance is starting or running —
+    # treat it as running even before its port binds (prevents startup races).
     try:
-        if os.path.exists(lock):
-            os.remove(lock)
+        with open(lock, "r", encoding="utf-8") as f:
+            pid = int(f.read().strip())
+        if pid != os.getpid() and _pid_alive(pid):
+            return True
     except Exception:
         pass
     return False
@@ -88,9 +86,22 @@ def _claim_lock() -> bool:
         os.close(fd)
         return True
     except FileExistsError:
-        return _already_running()
+        # Another process owns the lock. If it's alive, stand down. If dead
+        # (stale lock after a crash), remove it and retry once.
+        if _already_running():
+            return False
+        try:
+            os.remove(lock)
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            return True
+        except FileExistsError:
+            return False
+        except Exception:
+            return True
     except Exception:
-        return True  # fail open rather than block the bridge
+        return True
 
 _stats = {"requests": 0, "tool_calls": 0, "content": 0, "errors": 0,
           "retries": 0, "failovers": 0, "started": time.time(),
@@ -476,6 +487,11 @@ def openai_error(message: str, etype: str = "api_error", status: int = 500, code
 # --------------------------------------------------------------------------- handler
 
 
+class _NoReuseServer(ThreadingHTTPServer):
+    # Refuse a second bind on the same port at the OS level (atomic).
+    allow_reuse_address = False
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "antigravity-bridge-proxy/1.0"
@@ -633,7 +649,10 @@ class Handler(BaseHTTPRequestHandler):
 
             # Skip retry for tool-less chats: plain content is valid; a second
             # agy spawn doubles latency (30-50s+) for nothing.
-            if a["need_retry"] and tools:
+            # No second agy spawn for an unusable tool reply: each call takes
+            # 40-60s, and a retry doubles latency and blows the client timeout.
+            # Fail fast; the combo router will pick another healthy model.
+            if False and a["need_retry"] and tools:
                 _stats["retries"] += 1
                 log(f"{model} -> unusable reply; retrying once")
                 try:
@@ -752,7 +771,11 @@ def main() -> None:
     os.makedirs(WORKSPACE, exist_ok=True)
     agy_base()
     ms = free_models(force=True)
-    srv = ThreadingHTTPServer((BIND, PORT), Handler)
+    try:
+        srv = _NoReuseServer((BIND, PORT), Handler)
+    except OSError as e:
+        print(f'port {PORT} already bound; exiting: {e}', flush=True)
+        return
     srv.daemon_threads = True
     authed = bool(os.environ.get("ANTI_GRAVITY_BRIDGE_PROXY_KEY"))
     log(f"antigravity-bridge proxy v1.0 on http://{BIND}:{PORT}/v1  (workspace: {WORKSPACE}, "
