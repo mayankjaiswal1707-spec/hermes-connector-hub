@@ -439,6 +439,18 @@ def parse_model_json(text: str):
                     raw = {"_raw": raw[:300]}
             if isinstance(raw, dict):
                 return {"tool_calls": [{"name": str(obj["name"]), "arguments": raw}]}
+        # Antigravity sometimes emits {"tool": "name", "parameters": {...}}
+        tool_name = obj.get("tool") or obj.get("tool_name") or obj.get("function_name")
+        if tool_name:
+            raw = obj.get("parameters", obj.get("arguments", {}))
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except Exception:
+                    raw = {"_raw": raw[:300]}
+            if not isinstance(raw, dict):
+                raw = {}
+            return {"tool_calls": [{"name": str(tool_name), "arguments": raw}]}
     return None
 
 
