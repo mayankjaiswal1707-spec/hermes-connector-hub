@@ -31,8 +31,8 @@ TIMEOUT = int(os.environ.get("NVIDIA_BRIDGE_TIMEOUT", "60"))
 API = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 # Only models verified working with the provided NVIDIA NIM key.
-FREE_MODELS = ("nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3.5-bolt-e4b", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "nvidia/nemotron-3.5-super-vl-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b", "minimaxai/minimax-m3.1-flash", "meta/muse-glimmer-30b", "poolside/laguna-xs-2.1", "stepfun-ai/step-5-preview", "mistralai/mistral-large-4-1t-a52b", "google/gemma-4-31b-it")
-PREFERRED = ("minimaxai/minimax-m3.1-flash", "nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3.5-bolt-e4b", "meta/muse-glimmer-30b", "poolside/laguna-xs-2.1", "stepfun-ai/step-5-preview", "nvidia/nemotron-3-ultra-550b-a55b")
+FREE_MODELS = ('minimaxai/minimax-m3.1-flash', 'mistralai/mistral-large-4-1t-a52b', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning', 'nvidia/nemotron-3-ultra-550b-a55b', 'nvidia/nemotron-3.5-bolt-e4b', 'nvidia/nemotron-3.5-lightning-30b-a3b', 'nvidia/nemotron-3.5-super-vl-120b-a12b', 'poolside/laguna-xs-2.1', 'stepfun-ai/step-5-preview')
+PREFERRED = ('minimaxai/minimax-m3.1-flash', 'nvidia/nemotron-3.5-lightning-30b-a3b', 'nvidia/nemotron-3.5-bolt-e4b', 'nvidia/nemotron-3.5-super-vl-120b-a12b', 'nvidia/nemotron-3-ultra-550b-a55b', 'stepfun-ai/step-5-preview')
 
 
 # ---- single-instance guard: only ONE process may bind this bridge's port ----
@@ -99,8 +99,28 @@ def log(msg):
         pass
 
 
+def _load_env_keys() -> None:
+    try:
+        env = os.path.join(os.environ.get("LOCALAPPDATA", ""), "hermes", ".env")
+        with open(env, "r", encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                if "=" in raw and not raw.strip().startswith("#"):
+                    k, v = raw.split("=", 1)
+                    k, v = k.strip(), v.strip().strip('"').strip("'")
+                    if k in ("NVIDIA_API_KEY", "NVIDIA_API_KEY_2", "NVIDIA_BRIDGE_PROXY_KEY") and not os.environ.get(k):
+                        os.environ[k] = v
+    except Exception:
+        pass
+_load_env_keys()
+
+
 def api_key():
     return os.environ.get("NVIDIA_API_KEY") or ""
+
+
+def api_keys() -> list[str]:
+    return [k.strip() for k in (os.environ.get("NVIDIA_API_KEY", ""),
+                                os.environ.get("NVIDIA_API_KEY_2", "")) if k.strip()]
 
 
 def resolve_model(model):
@@ -170,24 +190,28 @@ def build_prompt(messages, tools, tool_choice):
 
 
 def call_nvidia(model, prompt):
-    key = api_key()
-    if not key:
+    keys = api_keys()
+    if not keys:
         raise RuntimeError("NVIDIA_API_KEY not configured")
     body = {"model": model, "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 2048, "temperature": 0}
-    req = urllib.request.Request(
-        API, data=json.dumps(body).encode("utf-8"),
-        headers={"content-type": "application/json", "authorization": f"Bearer {key}"},
-        method="POST")
     t0 = time.monotonic()
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-        status = 200
-    except urllib.error.HTTPError as e:
-        raw = e.read().decode("utf-8", errors="replace")
-        status = e.code
-    return status, raw, int((time.monotonic() - t0) * 1000)
+    last_status, last_raw = 0, ""
+    for key in keys:
+        req = urllib.request.Request(
+            API, data=json.dumps(body).encode("utf-8"),
+            headers={"content-type": "application/json", "authorization": f"Bearer {key}"},
+            method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            return 200, raw, int((time.monotonic() - t0) * 1000)
+        except urllib.error.HTTPError as e:
+            last_status, last_raw = e.code, e.read().decode("utf-8", errors="replace")
+            if e.code in (401, 403):
+                continue  # bad key -> try next
+            break
+    return last_status, last_raw, int((time.monotonic() - t0) * 1000)
 
 
 def extract_text(raw):
