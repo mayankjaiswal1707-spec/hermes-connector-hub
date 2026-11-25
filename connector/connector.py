@@ -2283,14 +2283,15 @@ function render(logText,R,H){
    const cls={working:'b-ok',quota:'b-quota',failing:'b-fail'}[rec.status]||'b-unk';
    const ms=(rec.reply&&rec.reply.ms!=null)?rec.reply.ms+'ms':'-';
    const tool=(rec.tool&&rec.tool.ok)?('tools:'+(rec.tool.mode||'ok')):'tools:-';
+   const tok=rec.context_length_label||'-';
    const retr=rec.status!=='working'?'<button onclick="retryModel(this.dataset.m)" data-m="'+esc(mid)+'">Retry</button>':'';
    const err=rec.error?('<div class="err">'+esc(String(rec.error).slice(0,150))+'</div>'):'';
-   rows.push('<tr><td><code>'+esc(mid)+'</code>'+err+'</td><td><span class="badge '+cls+'">'+esc(rec.status||'unknown')+'</span></td><td>'+esc(ms)+'</td><td>'+esc(tool)+'</td><td>'+ago(rec.last_probed)+'</td><td>'+(rec.in_hermes?'<span class="badge b-ok">in hermes</span>':'&mdash;')+'</td><td>'+retr+'</td></tr>');
+   rows.push('<tr><td><code>'+esc(mid)+'</code>'+err+'</td><td><span class="badge '+cls+'">'+esc(rec.status||'unknown')+'</span></td><td>'+esc(ms)+'</td><td>'+esc(tool)+'</td><td title="'+esc(rec.context_length||'')+'">'+esc(tok)+'</td><td>'+ago(rec.last_probed)+'</td><td>'+(rec.in_hermes?'<span class="badge b-ok">in hermes</span>':'&mdash;')+'</td><td>'+retr+'</td></tr>');
   }
   if(!rows.length)continue;
   const pend=p.pending_decision?'<div class="pending"><b>Probe finished.</b> Keep '+esc(slug)+' in Hermes? <button class="ok" onclick="decide(this.dataset.s,\\'keep\\')" data-s="'+esc(slug)+'">Keep</button> <button class="danger" onclick="decide(this.dataset.s,\\'delete\\')" data-s="'+esc(slug)+'">Delete</button></div>':'';
   const oa=p.auth==='oauth'?('<div class="pending"><b>OAuth:</b> '+((p.token&&p.token.present)?'token present':'no token')+' <button onclick="startOauth(this.dataset.s)" data-s="'+esc(slug)+'">Login</button></div>'):'';
-  html+='<div class="card"><div class="pid"><div><div class="nm">'+esc(p.name||slug)+' <span class="muted">['+esc(slug)+']</span></div><div class="meta">'+esc(p.url)+' · key '+esc(p.key_masked||'none')+' · '+esc(p.auth||'static')+'</div></div><div><button class="danger" onclick="removeProvider(this.dataset.s)" data-s="'+esc(slug)+'">Remove</button></div></div>'+oa+pend+'<table><tr><th>Model (raw id)</th><th>Status</th><th>Reply</th><th>Tools</th><th>Probed</th><th>Hermes</th><th></th></tr>'+rows.join('')+'</table></div>';
+  html+='<div class="card"><div class="pid"><div><div class="nm">'+esc(p.name||slug)+' <span class="muted">['+esc(slug)+']</span></div><div class="meta">'+esc(p.url)+' · key '+esc(p.key_masked||'none')+' · '+esc(p.auth||'static')+'</div></div><div><button class="danger" onclick="removeProvider(this.dataset.s)" data-s="'+esc(slug)+'">Remove</button></div></div>'+oa+pend+'<table><tr><th>Model (raw id)</th><th>Status</th><th>Reply</th><th>Tools</th><th>Tokens (ctx)</th><th>Probed</th><th>Hermes</th><th></th></tr>'+rows.join('')+'</table></div>';
  }
  document.getElementById('providers').innerHTML=html||'<div class="card muted">no providers match the filters</div>';
  if(logText!=null)document.getElementById('log').textContent=logText;
@@ -2566,6 +2567,98 @@ def verify_hermes_bg() -> None:
     log(f"hermes verify -> {_HERMES_VERIFY['state']} ({_HERMES_VERIFY['secs']}s)")
 
 
+_STATIC_TOKEN_LIMITS = {'gemini-3.5-flash-lite': 1048576, 'gemini-3.5-flash': 1048576, 'gemini-3.1-flash-lite': 1048576, 'gemini-flash-lite-latest': 1048576, 'gemini-2.5-flash': 1048576, 'gemini-3-flash-preview': 1048576, 'gemini-flash-latest': 1048576, 'gemini-3.8-flash-low': 1048576, 'gemini-3.8-flash-medium': 1048576, 'gemini-3.8-flash-high': 1048576, 'claude-sonnet-4-6': 200000, 'claude-opus-4-6-thinking': 200000, 'gpt-oss-120b-medium': 131072, 'cline-free/nemotron-3.5-super-vl': 262144, 'nvidia/nemotron-3.5-lightning-free': 262144, 'nvidia/nemotron-3.5-lightning-30b-a3b': 262144, 'nvidia/nemotron-3.5-bolt-e4b': 262144, 'nvidia/nemotron-3.5-super-vl-120b-a12b': 262144, 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': 262144, 'nvidia/nemotron-3-ultra-550b-a55b': 262144, 'minimaxai/minimax-m3.1-flash': 1048576, 'mistralai/mistral-large-4-1t-a52b': 262144, 'poolside/laguna-xs-2.1': 262144, 'stepfun-ai/step-5-preview': 262144, 'nvidia/ising-calibration-1.5-31b': 131072, 'nvidia/riva-translate-4b-instruct-v2': 8192, 'glm-4-flash': 128000, 'glm-4.5-flash': 128000, 'glm-4.7-flashx': 202752, 'glm-4.7-flash': 202752}
+
+
+# ---- per-model token limits (context window) ----
+_TOKEN_LIMIT_CACHE = {"at": 0.0, "map": {}}
+
+
+def token_limits() -> dict[str, int]:
+    """Return {model_id: context_length} from Hermes caches + static fallback.
+
+    Refreshed at most every 5 minutes; cache reads are cheap and local.
+    """
+    now = time.monotonic()
+    if _TOKEN_LIMIT_CACHE["map"] and now - _TOKEN_LIMIT_CACHE["at"] < 300:
+        return _TOKEN_LIMIT_CACHE["map"]
+    result: dict[str, int] = {}
+    # static fallback first (provider-specific ids + bare ids)
+    for k, v in _STATIC_TOKEN_LIMITS.items():
+        result[k] = v
+        result[k.split("/")[-1]] = v
+    try:
+        ctx = os.path.join(HERMES_HOME, "context_length_cache.yaml")
+        with open(ctx, "r", encoding="utf-8", errors="replace") as f:
+            for raw in f:
+                m = re.match(r"^\s*([^:]+(?:\.\S+)*):\s*(\d+)\s*$", raw)
+                if m:
+                    key = m.group(1).split("@")[0].strip()
+                    result[key] = int(m.group(2))
+                    result[key.split("/")[-1]] = int(m.group(2))
+    except Exception:
+        pass
+    try:
+        ep = os.path.join(HERMES_HOME, "cache", "endpoint_model_metadata.json")
+        with open(ep, "r", encoding="utf-8", errors="replace") as f:
+            d = json.load(f)
+        for _url, info in d.items():
+            for mid, meta in (info.get("models") or {}).items():
+                cl = meta.get("context_length") if isinstance(meta, dict) else None
+                if isinstance(cl, int) and cl > 0:
+                    result[mid] = cl
+                    result[mid.split("/")[-1]] = cl
+    except Exception:
+        pass
+    # family-based inference for ids without explicit metadata
+    for key in list(result):
+        low = key.lower()
+        val = result[key]
+        if "gemini" in low or "hydrogen" in low:
+            result.setdefault("gemini", max(val, 1_000_000))
+        if "nemotron" in low or "nvidia/" in low:
+            result.setdefault("nemotron", max(val, 262144))
+        if "glm" in low:
+            result.setdefault("glm", max(val, 128000))
+    for key, val in (("gemini", 1_000_000), ("hydrogen", 1_000_000),
+                     ("nemotron", 262144), ("glm", 128000),
+                     ("claude", 200000), ("gpt", 128000), ("qwen", 128000),
+                     ("deepseek", 128000), ("kimi", 128000), ("longcat", 128000),
+                     ("minimax", 1_000_000), ("ernie", 128000), ("flint", 128000),
+                     ("stag", 128000), ("beam", 128000), ("iceman", 128000),
+                     ("tidepool", 128000), ("inkling", 128000), ("solar", 524288),
+                     ("particle", 128000), ("north-mini", 128000), ("dots", 128000),
+                     ("lfm", 128000)):
+        result.setdefault(key, val)
+    _TOKEN_LIMIT_CACHE.update(at=now, map=result)
+    return result
+
+
+def resolve_tokens(mid: str, limits: dict[str, int]) -> int | None:
+    """Best-effort context length for a model id."""
+    if mid in limits:
+        return limits[mid]
+    low = mid.lower()
+    bare = mid.split("/")[-1].replace(":free", "").lower()
+    if bare in limits:
+        return limits[bare]
+    for key, val in limits.items():
+        if key in low:
+            return val
+    return None
+
+
+def fmt_tokens(n: int | None) -> str:
+    if not n or n <= 0:
+        return "-"
+    if n >= 1_000_000:
+        v = n / 1_000_000
+        return (f"{v:.1f}M" if v != int(v) else f"{int(v)}M")
+    if n >= 1000:
+        return f"{n // 1000}k"
+    return str(n)
+
+
 def cmd_serve(args) -> int:
     """Connector Hub: dashboard UI + JSON API on 127.0.0.1:8399."""
     srv_state = {"restarting": False}
@@ -2579,8 +2672,14 @@ def cmd_serve(args) -> int:
 
     def masked_status() -> dict:
         st = state_load()
+        limits = token_limits()
         for slug, p in st.get("providers", {}).items():
             p["key_masked"] = provider_bearer(slug, p)[1]
+            for mid, rec in (p.get("models") or {}).items():
+                if isinstance(rec, dict):
+                    cl = rec.get("context_length") or resolve_tokens(mid, limits)
+                    rec["context_length"] = cl
+                    rec["context_length_label"] = fmt_tokens(cl)
             if p.get("auth") == "oauth":
                 tok = token_load(slug) or {}
                 p["token"] = {"present": bool(tok.get("access_token")),
