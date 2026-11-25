@@ -24,7 +24,6 @@ $sources = @(
   'bridges\nvidia-bridge\proxy\proxy.py',
   'bridges\openrouter-bridge\proxy\proxy.py',
   'bridges\nous-bridge\proxy\proxy.py',
-  'bridges\freetoken-bridge\proxy\proxy.py'
 )
 foreach ($s in $sources) {
   $f = Join-Path $root $s

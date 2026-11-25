@@ -31,8 +31,6 @@ $map = @(
   @('bridges\openrouter-bridge\proxy\start-proxy.cmd', 'openrouter-bridge\proxy\start-proxy.cmd'),
   @('bridges\nous-bridge\proxy\proxy.py', 'nous-bridge\proxy\proxy.py'),
   @('bridges\nous-bridge\proxy\start-proxy.cmd', 'nous-bridge\proxy\start-proxy.cmd'),
-  @('bridges\freetoken-bridge\proxy\proxy.py', 'freetoken-bridge\proxy\proxy.py'),
-  @('bridges\freetoken-bridge\proxy\start-proxy.cmd', 'freetoken-bridge\proxy\start-proxy.cmd')
 )
 foreach ($m in $map) {
   $src = Join-Path $repo $m[0]
