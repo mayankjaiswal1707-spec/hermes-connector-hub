@@ -133,7 +133,7 @@ def _load_env_keys() -> None:
                 if "=" in raw and not raw.strip().startswith("#"):
                     k, v = raw.split("=", 1)
                     k, v = k.strip(), v.strip().strip('"').strip("'")
-                    if k in ("GOOGLE_API_KEY", "GOOGLE_API_KEY_2", "GEMINI_BRIDGE_PROXY_KEY") and not _os.environ.get(k):
+                    if k in ("GOOGLE_API_KEY", "GOOGLE_API_KEY_2", "GOOGLE_API_KEY_3", "GEMINI_BRIDGE_PROXY_KEY") and not _os.environ.get(k):
                         _os.environ[k] = v
     except Exception:
         pass
@@ -143,7 +143,8 @@ _load_env_keys()
 def api_keys() -> list[str]:
     """All configured Google keys (AIza... and newer AQ... auth keys)."""
     return [k.strip() for k in (os.environ.get("GOOGLE_API_KEY", ""),
-                                os.environ.get("GOOGLE_API_KEY_2", "")) if k.strip()]
+                                os.environ.get("GOOGLE_API_KEY_2", ""),
+                                os.environ.get("GOOGLE_API_KEY_3", "")) if k.strip()]
 
 
 def resolve_model(model: str | None) -> str | None:
