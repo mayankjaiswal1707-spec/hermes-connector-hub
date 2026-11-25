@@ -107,7 +107,7 @@ def _load_env_keys() -> None:
                 if "=" in raw and not raw.strip().startswith("#"):
                     k, v = raw.split("=", 1)
                     k, v = k.strip(), v.strip().strip('"').strip("'")
-                    if k in ("NVIDIA_API_KEY", "NVIDIA_API_KEY_2", "NVIDIA_BRIDGE_PROXY_KEY") and not os.environ.get(k):
+                    if k in ("NVIDIA_API_KEY", "NVIDIA_API_KEY_2", "NVIDIA_API_KEY_3", "NVIDIA_BRIDGE_PROXY_KEY") and not os.environ.get(k):
                         os.environ[k] = v
     except Exception:
         pass
@@ -120,7 +120,8 @@ def api_key():
 
 def api_keys() -> list[str]:
     return [k.strip() for k in (os.environ.get("NVIDIA_API_KEY", ""),
-                                os.environ.get("NVIDIA_API_KEY_2", "")) if k.strip()]
+                                os.environ.get("NVIDIA_API_KEY_2", ""),
+                                os.environ.get("NVIDIA_API_KEY_3", "")) if k.strip()]
 
 
 def resolve_model(model):
