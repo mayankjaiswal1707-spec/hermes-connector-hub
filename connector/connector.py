@@ -399,8 +399,8 @@ def render_provider_block(slug: str, name: str, url: str, key_env: str,
         f"    discover_models: false",
         f"    models:",
     ]
-    for mid in models:
-        lines.append(f'      {mid}: "{mid}"')
+    for idx, mid in enumerate(models, 1):
+        lines.append(f'      {mid}: "{idx} · {mid}"')
     return "\n".join(lines) + "\n"
 
 
@@ -862,11 +862,13 @@ def sync_provider_to_hermes(st: dict, slug: str) -> dict:
         default_model=default_model,
         models=elig,
     )
-    for mid in elig:
+    for n, mid in enumerate(elig, 1):
         models_state[mid]["in_hermes"] = True
+        models_state[mid]["serial"] = n
     for mid, rec in models_state.items():
         if mid not in elig:
             rec["in_hermes"] = False
+            rec.pop("serial", None)
     mirror_provider_to_profile(slug, p, elig)
     return {"action": "written", "models": elig, "default_model": default_model, "backup": backup}
 
@@ -2366,18 +2368,19 @@ function render(logText,R,H){
    if(showFree&&rec.free===false)continue;
    if(showHermes&&!rec.in_hermes)continue;
    if(showWork&&rec.status!=='working')continue;
+   const serial=rec.serial||'';
    const cls={working:'b-ok',quota:'b-quota',failing:'b-fail'}[rec.status]||'b-unk';
    const ms=(rec.reply&&rec.reply.ms!=null)?rec.reply.ms+'ms':'-';
    const tool=(rec.tool&&rec.tool.ok)?('tools:'+(rec.tool.mode||'ok')):'tools:-';
    const tok=rec.context_length_label||'-';
    const retr=rec.status!=='working'?'<button onclick="retryModel(this.dataset.m)" data-m="'+esc(mid)+'">Retry</button>':'';
    const err=rec.error?('<div class="err">'+esc(String(rec.error).slice(0,150))+'</div>'):'';
-   rows.push('<tr><td><code>'+esc(mid)+'</code>'+err+'</td><td><span class="badge '+cls+'">'+esc(rec.status||'unknown')+'</span></td><td>'+esc(ms)+'</td><td>'+esc(tool)+'</td><td title="'+esc(rec.context_length||'')+'">'+esc(tok)+'</td><td>'+ago(rec.last_probed)+'</td><td>'+(rec.in_hermes?'<span class="badge b-ok">in hermes</span>':'&mdash;')+'</td><td>'+retr+'</td></tr>');
+   rows.push('<tr><td class="muted"><b>'+esc(serial)+'</b></td><td><code>'+esc(mid)+'</code>'+err+'</td><td><span class="badge '+cls+'">'+esc(rec.status||'unknown')+'</span></td><td>'+esc(ms)+'</td><td>'+esc(tool)+'</td><td title="'+esc(rec.context_length||'')+'">'+esc(tok)+'</td><td>'+ago(rec.last_probed)+'</td><td>'+(rec.in_hermes?'<span class="badge b-ok">in hermes</span>':'&mdash;')+'</td><td>'+retr+'</td></tr>');
   }
   if(!rows.length)continue;
   const pend=p.pending_decision?'<div class="pending"><b>Probe finished.</b> Keep '+esc(slug)+' in Hermes? <button class="ok" onclick="decide(this.dataset.s,\\'keep\\')" data-s="'+esc(slug)+'">Keep</button> <button class="danger" onclick="decide(this.dataset.s,\\'delete\\')" data-s="'+esc(slug)+'">Delete</button></div>':'';
   const oa=p.auth==='oauth'?('<div class="pending"><b>OAuth:</b> '+((p.token&&p.token.present)?'token present':'no token')+' <button onclick="startOauth(this.dataset.s)" data-s="'+esc(slug)+'">Login</button></div>'):'';
-  html+='<div class="card"><div class="pid"><div><div class="nm">'+esc(p.name||slug)+' <span class="muted">['+esc(slug)+']</span></div><div class="meta">'+esc(p.url)+' · key '+esc(p.key_masked||'none')+' · '+esc(p.auth||'static')+'</div></div><div><button class="danger" onclick="removeProvider(this.dataset.s)" data-s="'+esc(slug)+'">Remove</button></div></div>'+oa+pend+'<table><tr><th>Model (raw id)</th><th>Status</th><th>Reply</th><th>Tools</th><th>Tokens (ctx)</th><th>Probed</th><th>Hermes</th><th></th></tr>'+rows.join('')+'</table></div>';
+  html+='<div class="card"><div class="pid"><div><div class="nm">'+esc(p.name||slug)+' <span class="muted">['+esc(slug)+']</span></div><div class="meta">'+esc(p.url)+' · key '+esc(p.key_masked||'none')+' · '+esc(p.auth||'static')+'</div></div><div><button class="danger" onclick="removeProvider(this.dataset.s)" data-s="'+esc(slug)+'">Remove</button></div></div>'+oa+pend+'<table><tr><th>#</th><th>Model (raw id)</th><th>Status</th><th>Reply</th><th>Tools</th><th>Tokens (ctx)</th><th>Probed</th><th>Hermes</th><th></th></tr>'+rows.join('')+'</table></div>';
  }
  document.getElementById('providers').innerHTML=html||'<div class="card muted">no providers match the filters</div>';
  if(logText!=null)document.getElementById('log').textContent=logText;
