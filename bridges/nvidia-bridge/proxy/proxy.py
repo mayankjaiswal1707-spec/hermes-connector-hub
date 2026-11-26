@@ -124,6 +124,26 @@ def api_keys() -> list[str]:
                                 os.environ.get("NVIDIA_API_KEY_3", "")) if k.strip()]
 
 
+KEY_PATHS = {"/k1": "NVIDIA_API_KEY", "/k2": "NVIDIA_API_KEY_2",
+             "/k3": "NVIDIA_API_KEY_3"}
+
+
+def keys_for_path(path: str) -> list[str]:
+    """Return exactly one key for /kN paths, or all keys for the default path."""
+    for prefix, env in KEY_PATHS.items():
+        if path.startswith(prefix + "/"):
+            k = (os.environ.get(env) or "").strip()
+            return [k] if k else []
+    return api_keys()
+
+
+def strip_key_prefix(path: str) -> str:
+    for prefix in KEY_PATHS:
+        if path.startswith(prefix + "/"):
+            return path[len(prefix):]
+    return path
+
+
 def resolve_model(model):
     m = (model or "").strip().lower()
     if m in FREE_MODELS:
@@ -190,8 +210,8 @@ def build_prompt(messages, tools, tool_choice):
     return CONTRACT + "\n\n" + header + "TRANSCRIPT:\n" + "\n".join(rendered) + "\nReply with JSON only."
 
 
-def call_nvidia(model, prompt):
-    keys = api_keys()
+def call_nvidia(model, prompt, keys=None):
+    keys = keys or api_keys()
     if not keys:
         raise RuntimeError("NVIDIA_API_KEY not configured")
     body = {"model": model, "messages": [{"role": "user", "content": prompt}],
@@ -356,7 +376,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True, "port": PORT, "key": bool(api_key()),
                                     "models": list(FREE_MODELS),
                                     "stats": {**_stats, "uptime_s": int(time.time() - _stats["started"])}})
-        if path in ("/v1/models", "/models"):
+        if strip_key_prefix(path) in ("/v1/models", "/models"):
             if not self._auth():
                 return self._send(401, err_obj("unauthorized", 401))
             return self._send(200, {"object": "list", "data": [
@@ -365,10 +385,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
-        if path not in ("/v1/chat/completions", "/chat/completions"):
+        keys = keys_for_path(path)
+        if strip_key_prefix(path) not in ("/v1/chat/completions", "/chat/completions"):
             return self._send(404, err_obj(f"unknown path {path}", 404))
         if not self._auth():
             return self._send(401, err_obj("unauthorized: bad bearer key", 401))
+        if not keys:
+            return self._send(503, err_obj("no API key configured for this endpoint", 503))
         try:
             n = int(self.headers.get("content-length") or 0)
             payload = json.loads(self.rfile.read(n) or b"{}")
@@ -376,7 +399,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, err_obj(f"bad request: {e}", 400))
         _stats["requests"] += 1
         try:
-            self._chat(payload)
+            self._chat(payload, keys)
         except Exception as e:
             _stats["errors"] += 1
             log(f"internal error: {type(e).__name__}: {e}")
@@ -385,7 +408,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-    def _chat(self, payload):
+    def _chat(self, payload, keys=None):
         model_req = str(payload.get("model") or "")
         if model_req and not resolve_model(model_req):
             return self._send(400, err_obj(
@@ -397,7 +420,7 @@ class Handler(BaseHTTPRequestHandler):
         prompt = build_prompt(messages, tools, payload.get("tool_choice"))
         last = "no attempt"
         for model in order_models(model_req):
-            status, raw, ms = call_nvidia(model, prompt)
+            status, raw, ms = call_nvidia(model, prompt, keys)
             text, error = extract_text(raw)
             if status == 200 and text:
                 parsed = parse_model_json(text) or {"content": text}

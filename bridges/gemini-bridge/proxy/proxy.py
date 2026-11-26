@@ -147,6 +147,25 @@ def api_keys() -> list[str]:
                                 os.environ.get("GOOGLE_API_KEY_3", "")) if k.strip()]
 
 
+KEY_PATHS = {"/k1": "GOOGLE_API_KEY", "/k2": "GOOGLE_API_KEY_2",
+             "/k3": "GOOGLE_API_KEY_3"}
+
+
+def keys_for_path(path: str) -> list[str]:
+    for prefix, env in KEY_PATHS.items():
+        if path.startswith(prefix + "/"):
+            k = (os.environ.get(env) or "").strip()
+            return [k] if k else []
+    return api_keys()
+
+
+def strip_key_prefix(path: str) -> str:
+    for prefix in KEY_PATHS:
+        if path.startswith(prefix + "/"):
+            return path[len(prefix):]
+    return path
+
+
 def resolve_model(model: str | None) -> str | None:
     m = (model or "").strip().lower()
     m = re.sub(r"^(gemini|gemini-free)/", "", m)
@@ -253,8 +272,8 @@ def build_prompt(messages: list, tools: list, tool_choice) -> str:
     return CONTRACT + "\n\n" + body + "Reply with JSON only."
 
 
-def call_gemini(model: str, prompt: str) -> tuple[int, str, int]:
-    keys = api_keys()
+def call_gemini(model: str, prompt: str, keys=None) -> tuple[int, str, int]:
+    keys = keys or api_keys()
     if not keys:
         raise RuntimeError("GOOGLE_API_KEY not configured")
     body = {
@@ -400,7 +419,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True, "port": PORT, "models": list(FREE_MODELS),
                                     "key": bool(api_key()),
                                     "stats": {**_stats, "uptime_s": int(time.time() - _stats["started"])}})
-        if path in ("/v1/models", "/models"):
+        if strip_key_prefix(path) in ("/v1/models", "/models"):
             if not self._authorized():
                 return self._send(401, openai_error("unauthorized", "authentication_error", 401))
             return self._send(200, {"object": "list", "data": [
@@ -410,10 +429,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
-        if path not in ("/v1/chat/completions", "/chat/completions"):
+        keys = keys_for_path(path)
+        if strip_key_prefix(path) not in ("/v1/chat/completions", "/chat/completions"):
             return self._send(404, openai_error(f"unknown path {path}", "invalid_request_error", 404))
         if not self._authorized():
             return self._send(401, openai_error("unauthorized: bad bearer key", "authentication_error", 401))
+        if not keys:
+            return self._send(503, openai_error("no API key configured for this endpoint", 503))
         try:
             n = int(self.headers.get("content-length") or 0)
             payload = json.loads(self.rfile.read(n) or b"{}")
@@ -421,7 +443,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, openai_error(f"bad request: {e}", "invalid_request_error", 400))
         _stats["requests"] += 1
         try:
-            self._chat(payload)
+            self._chat(payload, keys)
         except Exception as e:
             _stats["errors"] += 1
             log(f"internal error: {type(e).__name__}: {e}")
@@ -430,7 +452,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-    def _chat(self, payload):
+    def _chat(self, payload, keys=None):
         model_req = str(payload.get("model") or "")
         if model_req and not resolve_model(model_req):
             return self._send(400, openai_error(
@@ -449,7 +471,7 @@ class Handler(BaseHTTPRequestHandler):
         tried = []
         for model in order_models(model_req)[:4]:
             tried.append(model)
-            status, raw, ms = call_gemini(model, prompt)
+            status, raw, ms = call_gemini(model, prompt, keys)
             text, err = extract_text(raw)
             if status == 200 and text:
                 parsed = parse_model_json(text) or {"content": text}
