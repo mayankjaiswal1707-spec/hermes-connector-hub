@@ -20,7 +20,6 @@ $sources = @(
   'bridges\opencode-bridge\proxy\proxy.py',
   'bridges\antigravity-bridge\proxy\proxy.py',
   'bridges\gemini-bridge\proxy\proxy.py',
-  'bridges\zhipu-bridge\proxy\proxy.py',
   'bridges\nvidia-bridge\proxy\proxy.py',
   'bridges\openrouter-bridge\proxy\proxy.py',
   'bridges\nous-bridge\proxy\proxy.py'

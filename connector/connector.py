@@ -969,16 +969,6 @@ SEED_PROVIDERS = {
         "key_env_added_by_connector": False,
     },
     # NVIDIA NIM bridge (port 8382): OpenAI-compatible proxy over
-    # Zhipu / Z.ai GLM free Flash models (port 8381). Paid GLM-5.x excluded.
-    "zhipu-free": {
-        "name": "Zhipu GLM Free",
-        "url": "http://127.0.0.1:8381/v1",
-        "key_env": "ZHIPU_BRIDGE_PROXY_KEY",
-        "auth": "static",
-        "fallback_models": ["glm-4-flash", "glm-4.7-flashx", "glm-4.7-flash", "glm-4.5-flash"],
-        "free_override": ["glm-4-flash", "glm-4.7-flashx", "glm-4.7-flash", "glm-4.5-flash"],
-        "key_env_added_by_connector": False,
-    },
     # Antigravity bridge (port 8379): OpenAI-compatible proxy over the
     # Antigravity CLI (`agy -p`). Free Google tier: all models the account
     # can use via the CLI are free -> free_override covers the whole list.
@@ -1977,7 +1967,6 @@ AUTOSTART_TASKS = [
     ("Hermes_OpenCodeBridge", "opencode-bridge.cmd"),
     ("Hermes_AntigravityBridge", "antigravity-bridge.cmd"),
     ("Hermes_GeminiBridge", "gemini-bridge.cmd"),
-    ("Hermes_ZhipuBridge", "zhipu-bridge.cmd"),
     ("Hermes_NvidiaBridge", "nvidia-bridge.cmd"),
     ("Hermes_OpenRouterBridge", "openrouter-bridge.cmd"),
     ("Hermes_NousBridge", "nous-bridge.cmd"),
@@ -2013,11 +2002,6 @@ def autostart_write_wrappers() -> None:
         "gemini-bridge.cmd": (
             "@echo off\r\nrem autostart: Gemini bridge proxy (port 8380)\r\n"
             f"cd /d \"{os.path.join(HERMES_HOME, 'gemini-bridge', 'proxy')}\"\r\n"
-            "call start-proxy.cmd\r\n"
-        ),
-        "zhipu-bridge.cmd": (
-            "@echo off\r\nrem autostart: Zhipu GLM bridge proxy (port 8381)\r\n"
-            f"cd /d \"{os.path.join(HERMES_HOME, 'zhipu-bridge', 'proxy')}\"\r\n"
             "call start-proxy.cmd\r\n"
         ),
         "nvidia-bridge.cmd": (
@@ -2410,7 +2394,6 @@ DEFAULT_COMBO = [
     {"provider": "gemini-free", "model": "gemini-3.5-flash-lite"},
     {"provider": "nvidia-free", "model": "nvidia/nemotron-3.5-lightning-30b-a3b"},
     {"provider": "gemini-free", "model": "gemini-3.1-flash-lite"},
-    {"provider": "zhipu-free", "model": "glm-4.7-flashx"},
     {"provider": "cline-free", "model": "cline-free/nemotron-3.5-super-vl"},
     {"provider": "cline-free", "model": "cline-free/solar-mini4"},
     {"provider": "opencode-free", "model": "opencode/beam-free"},
@@ -2845,7 +2828,6 @@ def cmd_serve(args) -> int:
                     "opencode-free": "opencode-bridge.cmd",
                     "antigravity-free": "antigravity-bridge.cmd",
                     "gemini-free": "gemini-bridge.cmd",
-                    "zhipu-free": "zhipu-bridge.cmd",
                     "nvidia-free": "nvidia-bridge.cmd",
                     "openrouter-free": "openrouter-bridge.cmd",
                     "nous-free": "nous-bridge.cmd"}
