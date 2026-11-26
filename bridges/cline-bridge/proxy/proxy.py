@@ -131,6 +131,12 @@ def cline_base() -> list[str] | None:
         return _base_cache
     node = shutil.which("node")
     cli = shutil.which("cline")
+    # Hermes updates can drop cline from PATH; resolve the installed exe directly.
+    exe = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "npm", "node_modules",
+                       "cline", "node_modules", "@cline", "cli-windows-x64", "bin", "cline.exe")
+    if os.path.isfile(exe):
+        _base_cache = [exe]
+        return _base_cache
     if node and cli:
         binpath = os.path.join(os.path.dirname(os.path.abspath(cli)),
                                "node_modules", "cline", "bin", "cline")
